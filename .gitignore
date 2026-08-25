@@ -1,1 +1,8 @@
 .DS_Store
+node_modules/
+dist/
+.firebase/
+*.log
+.env
+.env.local
+functions/lib/
