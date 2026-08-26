@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import { DEFAULT_MODELS, MODEL_OPTIONS } from '../lib/models';
+import { getApiKey, saveApiKey } from '../lib/openrouter';
 import type { ModelSettings } from '../lib/types';
 
 const KEYS: { key: keyof ModelSettings; label: string }[] = [
@@ -24,13 +25,15 @@ export default function SettingsPage() {
     getDoc(doc(db, 'users', user.uid)).then((snap) => {
       const d = snap.data();
       if (d?.settings) setSettings({ ...DEFAULT_MODELS, ...d.settings });
-      if (d?.openrouterKey) setApiKey(d.openrouterKey);
+      const k = getApiKey();
+      if (k) setApiKey(k);
     });
   }, [user]);
 
   const save = async () => {
     if (!user) return;
-    await setDoc(doc(db, 'users', user.uid), { settings, openrouterKey: apiKey }, { merge: true });
+    saveApiKey(apiKey);
+    await setDoc(doc(db, 'users', user.uid), { settings }, { merge: true });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -40,7 +43,7 @@ export default function SettingsPage() {
       <h2>Einstellungen</h2>
 
       <div className="field">
-        <label>OpenRouter API-Key (dein eigener — Kosten laufen über deinen Account)</label>
+        <label>OpenRouter API-Key (dein eigener — Kosten laufen über deinen Account, nur lokal gespeichert)</label>
         <input
           type="password"
           value={apiKey}

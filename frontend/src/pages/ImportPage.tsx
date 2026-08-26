@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
-import { extractRecipe, estimateNutrition, classifyRecipe } from '../lib/api';
-import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
+import { extractRecipe } from '../lib/extract';
+import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
+import { getApiKey } from '../lib/openrouter';
+import { DEFAULT_MODELS } from '../lib/models';
+import type { Recipe, Nutrition, KcalBucket, SourceType, ModelSettings } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 
 type Mode = 'url' | 'text' | 'image';
@@ -13,6 +16,17 @@ function detectSourceType(u: string): SourceType {
   if (u.includes('tiktok')) return 'tiktok';
   if (u.includes('youtube') || u.includes('youtu.be')) return 'youtube';
   return 'blog';
+}
+
+async function loadSettings(uid: string): Promise<ModelSettings> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    const d = snap.data();
+    if (d?.settings) return { ...DEFAULT_MODELS, ...d.settings };
+  } catch {
+    // Fallback auf Defaults
+  }
+  return { ...DEFAULT_MODELS };
 }
 
 export default function ImportPage() {
@@ -53,27 +67,35 @@ export default function ImportPage() {
     setLoading(true);
     setError('');
     try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
+
+      const settings = await loadSettings(user.uid);
       const sourceType = mode === 'url' ? detectSourceType(url) : 'manual';
-      const res = await extractRecipe({
+      const extracted = await extractRecipe({
         sourceType,
         url: mode === 'url' ? url : undefined,
         text: mode === 'text' ? text : undefined,
         imageDataUrl: mode === 'image' ? imageDataUrl : undefined,
+        model: settings.extract,
+        visionModel: settings.vision,
+        apiKey,
       });
+      const { sourceUrl, ...rest } = extracted;
       const recipe: Recipe = {
-        ...(res.data as Recipe),
+        ...rest,
         ownerId: user.uid,
         source_type: sourceType,
+        source_url: sourceUrl,
         folders: [],
       };
       setDraft(recipe);
 
-      const [nutRes, classRes] = await Promise.all([
-        estimateNutrition({ recipe }),
-        classifyRecipe({ recipe }),
+      const [nutrition, cls] = await Promise.all([
+        estimateNutrition(recipe, apiKey, settings.nutrition),
+        classifyRecipe(recipe, apiKey, settings.nutrition),
       ]);
-      setNutrition(nutRes.data as Nutrition);
-      const cls = classRes.data as { folders: string[]; kcal_bucket: KcalBucket };
+      setNutrition(nutrition);
       setFolders(cls.folders.filter((f) => DEFAULT_FOLDERS.includes(f)));
       setKcalBucket(cls.kcal_bucket);
     } catch (err: any) {

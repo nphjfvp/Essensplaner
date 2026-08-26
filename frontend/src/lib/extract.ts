@@ -1,7 +1,6 @@
-import * as functions from 'firebase-functions';
-import { chatCompletion, getOpenRouterKey, parseJson } from './_shared/openrouter';
-import { DEFAULT_MODELS } from './_shared/models';
-import { EXTRACT_PROMPT } from './_shared/prompts';
+import { chatCompletion, parseJson } from './openrouter';
+import { EXTRACT_PROMPT } from './prompts';
+import type { SourceType } from './types';
 
 export interface ExtractedRecipe {
   title: string;
@@ -10,31 +9,30 @@ export interface ExtractedRecipe {
   steps: string[];
 }
 
-export const extractRecipe = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError('unauthenticated', 'Nicht eingeloggt');
+export interface ExtractInput {
+  sourceType: SourceType;
+  url?: string;
+  text?: string;
+  imageDataUrl?: string;
+  model: string;
+  visionModel: string;
+  apiKey: string;
+}
 
-  const sourceType: string = data.sourceType ?? 'manual';
-  const url: string | undefined = data.url;
-  const text: string | undefined = data.text;
-  const imageDataUrl: string | undefined = data.imageDataUrl;
-  const model: string = data.model ?? DEFAULT_MODELS.extract;
+export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecipe & { sourceUrl?: string }> {
+  const { sourceType, url, text, imageDataUrl, model, visionModel, apiKey } = input;
 
   // 1) Blog-URL: erst Schema.org JSON-LD versuchen (kein API-Key nötig)
-  if (url && (sourceType === 'blog' || sourceType === 'unknown')) {
+  if (url && sourceType === 'blog') {
     const structured = await tryJsonLd(url);
-    if (structured) {
-      return { ...structured, sourceUrl: url, sourceType };
-    }
+    if (structured) return { ...structured, sourceUrl: url };
   }
-
-  const key = await getOpenRouterKey(uid);
 
   // 2) Bild-Input: Vision-Modell
   if (imageDataUrl) {
     const raw = await chatCompletion(
       {
-        model: data.model ?? DEFAULT_MODELS.vision,
+        model: visionModel,
         messages: [
           { role: 'system', content: EXTRACT_PROMPT },
           {
@@ -47,9 +45,9 @@ export const extractRecipe = functions.https.onCall(async (data, context) => {
         ],
         jsonMode: true,
       },
-      key
+      apiKey
     );
-    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url, sourceType };
+    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
   }
 
   // 3) Text (Caption / Transcript / manuell)
@@ -63,39 +61,53 @@ export const extractRecipe = functions.https.onCall(async (data, context) => {
         ],
         jsonMode: true,
       },
-      key
+      apiKey
     );
-    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url, sourceType };
+    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
   }
 
-  throw new functions.https.HttpsError('invalid-argument', 'Keine Quelle angegeben (url/text/image)');
-});
+  throw new Error('Keine Quelle angegeben (url/text/image)');
+}
 
 async function tryJsonLd(url: string): Promise<ExtractedRecipe | null> {
-  try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'EssensplanerBot/1.0' } });
-    if (!res.ok) return null;
-    const html = await res.text();
+  // Direkt versuchen; bei CORS-Fehler über freien Proxy.
+  const candidates = [url, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
+  for (const src of candidates) {
+    const html = await fetchText(src);
+    if (!html) continue;
+    const recipe = parseJsonLd(html);
+    if (recipe) return recipe;
+  }
+  return null;
+}
 
-    const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = scriptRegex.exec(html)) !== null) {
-      try {
-        const parsed = JSON.parse(m[1]);
-        const nodes = Array.isArray(parsed) ? parsed : [parsed];
-        for (const node of nodes) {
-          const type = node['@type'];
-          const isRecipe = type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'));
-          if (isRecipe) return mapJsonLdToRecipe(node);
-        }
-      } catch {
-        // kaputtes JSON-Block überspringen
-      }
-    }
-    return null;
+async function fetchText(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.text();
   } catch {
     return null;
   }
+}
+
+function parseJsonLd(html: string): ExtractedRecipe | null {
+  const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = scriptRegex.exec(html)) !== null) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      const nodes = Array.isArray(parsed) ? parsed : [parsed];
+      for (const node of nodes) {
+        const type = node['@type'];
+        const isRecipe = type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'));
+        if (isRecipe) return mapJsonLdToRecipe(node);
+      }
+    } catch {
+      // kaputtes JSON überspringen
+    }
+  }
+  return null;
 }
 
 function mapJsonLdToRecipe(node: any): ExtractedRecipe {

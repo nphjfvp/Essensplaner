@@ -5,44 +5,45 @@ KI-gestützte Rezept-App: Rezepte importieren (URL / Text / Bild), Nährwerte sc
 ## Stack
 
 - **Frontend:** React + Vite + TypeScript (SPA)
-- **Backend:** Firebase — Auth (Google + anonym), Firestore, Storage, Cloud Functions, Hosting
-- **KI:** OpenRouter (API-Key **nur** serverseitig in Cloud Functions)
+- **Backend:** Firebase **Spark (kostenlos)** — Auth (Google + anonym), Firestore, Storage, Hosting. **Keine Cloud Functions, kein Blaze.**
+- **KI:** OpenRouter — direkt aus dem Browser, mit dem **eigenen** Key jedes Nutzers (BYOK).
 
 ## Struktur
 
 ```
 frontend/        React SPA
-functions/       Cloud Functions v2 (OpenRouter-Proxy: extract, nutrition, classify)
+  src/lib/openrouter.ts   OpenRouter-Aufruf (client-seitig) + Key-Verwaltung (localStorage)
+  src/lib/extract.ts      Rezept-Extraktion (JSON-LD → Vision → Text)
+  src/lib/nutrition.ts    Nährwert-Schätzung + Kategorisierung
+  src/lib/prompts.ts      Modell-Prompts
 firestore.rules  user-scoped Security Rules
 storage.rules
 .github/workflows/deploy.yml
 ```
 
-## Einmaliges Setup (Console — Account/Billing nötig)
+## Einmaliges Setup (Console — kein Billing nötig)
 
-1. **Blaze-Plan** aktivieren (Cloud Functions brauchen das; Free-Tier reicht).
-2. **APIs aktivieren** (falls Fehler wie „API has not been used…"):
-   - Firestore: `https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=essensplaner-38899`
-3. **Authentication** → Sign-in method → **Google** + **Anonym** aktivieren.
-4. **Firestore** → Datenbank erstellen (Location z.B. `europe-west3`).
+1. **Firestore** → Datenbank erstellen (Location z.B. `europe-west3`).
+2. **Authentication** → Sign-in method → **Google** + **Anonym** aktivieren.
+
+Spark-Plan reicht für Auth + Firestore + Storage + Hosting vollständig.
 
 ## OpenRouter-Key (BYOK)
 
-Jeder Nutzer trägt seinen **eigenen** OpenRouter-Key in den App-Settings ein. Kosten laufen pro Nutzer über dessen Account — kein geteilter Key, kein Server-Secret nötig.
+Jeder Nutzer trägt seinen **eigenen** OpenRouter-Key in den App-Settings ein. Kosten laufen pro Nutzer über dessen Account. Der Key wird **nur lokal im Browser** (`localStorage`) gespeichert — nie im Code, nie auf dem Server, nie geteilt.
 
-Key von https://openrouter.ai (Account → API Keys). Der Key wird in Firestore (`users/{uid}.openrouterKey`, nur für den Besitzer lesbar) gespeichert und serverseitig von den Cloud Functions gelesen — nie ins Frontend-Logik geschrieben, nie geteilt.
+Key von https://openrouter.ai (Account → API Keys).
 
 ## Lokal entwickeln
 
 ```bash
 cd frontend && npm install && npm run dev
-cd functions && npm install
 ```
 
 ## Deploy
 
 ```bash
-firebase deploy
+firebase deploy --only hosting
 ```
 
 ## CI/CD
@@ -57,4 +58,4 @@ Token als GitHub-Secret `FIREBASE_TOKEN` hinterlegen (Repo → Settings → Secr
 
 ## Modellwahl
 
-Pro Funktion separat in den App-Settings einstellbar (Extraktion, Vision, Nährwert, Anpassung, Review). Defaults in `frontend/src/lib/models.ts` / `functions/src/_shared/models.ts`. Inkl. kostenloser OpenRouter-Modelle.
+Pro Funktion separat in den App-Settings einstellbar (Extraktion, Vision, Nährwert, Anpassung, Review). Defaults in `frontend/src/lib/models.ts`. Inkl. kostenloser OpenRouter-Modelle.

@@ -1,7 +1,5 @@
-import * as functions from 'firebase-functions';
-import { db } from './admin';
-
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const KEY_STORAGE = 'essensplaner_openrouter_key';
 
 type ContentPart =
   | { type: 'text'; text: string }
@@ -27,9 +25,7 @@ export async function chatCompletion(args: ChatArgs, apiKey: string): Promise<st
     max_tokens: args.maxTokens ?? 4096,
     temperature: args.temperature ?? 0.3,
   };
-  if (args.jsonMode) {
-    body.response_format = { type: 'json_object' };
-  }
+  if (args.jsonMode) body.response_format = { type: 'json_object' };
 
   const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
@@ -42,27 +38,11 @@ export async function chatCompletion(args: ChatArgs, apiKey: string): Promise<st
 
   if (!res.ok) {
     const text = await res.text();
-    throw new functions.https.HttpsError(
-      'internal',
-      `OpenRouter error ${res.status}: ${text.slice(0, 500)}`
-    );
+    throw new Error(`OpenRouter Fehler ${res.status}: ${text.slice(0, 500)}`);
   }
 
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   return data.choices?.[0]?.message?.content ?? '';
-}
-
-// BYOK: jeder Nutzer trägt eigenen OpenRouter-Key (users/{uid}.openrouterKey).
-export async function getOpenRouterKey(uid: string): Promise<string> {
-  const snap = await db.collection('users').doc(uid).get();
-  const key = snap.data()?.openrouterKey as string | undefined;
-  if (!key) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'OpenRouter-Key fehlt — bitte in den Settings hinterlegen'
-    );
-  }
-  return key;
 }
 
 export function parseJson<T>(raw: string): T {
@@ -70,7 +50,18 @@ export function parseJson<T>(raw: string): T {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start === -1 || end === -1) {
-    throw new functions.https.HttpsError('internal', 'Kein JSON im Modell-Output gefunden');
+    throw new Error('Kein JSON im Modell-Output gefunden');
   }
   return JSON.parse(cleaned.slice(start, end + 1)) as T;
+}
+
+// BYOK: Key liegt nur lokal im Browser (localStorage) — nie im Code, nie auf dem Server.
+export function getApiKey(): string | null {
+  return localStorage.getItem(KEY_STORAGE);
+}
+export function saveApiKey(key: string) {
+  localStorage.setItem(KEY_STORAGE, key);
+}
+export function clearApiKey() {
+  localStorage.removeItem(KEY_STORAGE);
 }
