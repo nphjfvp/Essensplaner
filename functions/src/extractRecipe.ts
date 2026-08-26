@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import { chatCompletion, parseJson } from './_shared/openrouter';
+import { chatCompletion, getOpenRouterKey, parseJson } from './_shared/openrouter';
 import { DEFAULT_MODELS } from './_shared/models';
 import { EXTRACT_PROMPT } from './_shared/prompts';
 
@@ -11,13 +11,16 @@ export interface ExtractedRecipe {
 }
 
 export const extractRecipe = functions.https.onCall(async (data, context) => {
+  const uid = context.auth?.uid;
+  if (!uid) throw new functions.https.HttpsError('unauthenticated', 'Nicht eingeloggt');
+
   const sourceType: string = data.sourceType ?? 'manual';
   const url: string | undefined = data.url;
   const text: string | undefined = data.text;
   const imageDataUrl: string | undefined = data.imageDataUrl;
   const model: string = data.model ?? DEFAULT_MODELS.extract;
 
-  // 1) Blog-URL: erst Schema.org JSON-LD versuchen (zuverlässigster Weg)
+  // 1) Blog-URL: erst Schema.org JSON-LD versuchen (kein API-Key nötig)
   if (url && (sourceType === 'blog' || sourceType === 'unknown')) {
     const structured = await tryJsonLd(url);
     if (structured) {
@@ -25,35 +28,43 @@ export const extractRecipe = functions.https.onCall(async (data, context) => {
     }
   }
 
+  const key = await getOpenRouterKey(uid);
+
   // 2) Bild-Input: Vision-Modell
   if (imageDataUrl) {
-    const raw = await chatCompletion({
-      model: data.model ?? DEFAULT_MODELS.vision,
-      messages: [
-        { role: 'system', content: EXTRACT_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extrahiere das Rezept aus diesem Bild.' },
-            { type: 'image_url', image_url: { url: imageDataUrl } },
-          ],
-        },
-      ],
-      jsonMode: true,
-    });
+    const raw = await chatCompletion(
+      {
+        model: data.model ?? DEFAULT_MODELS.vision,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Extrahiere das Rezept aus diesem Bild.' },
+              { type: 'image_url', image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+        jsonMode: true,
+      },
+      key
+    );
     return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url, sourceType };
   }
 
   // 3) Text (Caption / Transcript / manuell)
   if (text) {
-    const raw = await chatCompletion({
-      model,
-      messages: [
-        { role: 'system', content: EXTRACT_PROMPT },
-        { role: 'user', content: text },
-      ],
-      jsonMode: true,
-    });
+    const raw = await chatCompletion(
+      {
+        model,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          { role: 'user', content: text },
+        ],
+        jsonMode: true,
+      },
+      key
+    );
     return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url, sourceType };
   }
 

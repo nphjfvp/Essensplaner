@@ -1,4 +1,5 @@
 import * as functions from 'firebase-functions';
+import { db } from './admin';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -19,15 +20,7 @@ interface ChatArgs {
   temperature?: number;
 }
 
-export async function chatCompletion(args: ChatArgs): Promise<string> {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'OPENROUTER_API_KEY nicht konfiguriert (functions:secrets:set)'
-    );
-  }
-
+export async function chatCompletion(args: ChatArgs, apiKey: string): Promise<string> {
   const body: Record<string, unknown> = {
     model: args.model,
     messages: args.messages,
@@ -42,7 +35,7 @@ export async function chatCompletion(args: ChatArgs): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
   });
@@ -57,6 +50,19 @@ export async function chatCompletion(args: ChatArgs): Promise<string> {
 
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   return data.choices?.[0]?.message?.content ?? '';
+}
+
+// BYOK: jeder Nutzer trägt eigenen OpenRouter-Key (users/{uid}.openrouterKey).
+export async function getOpenRouterKey(uid: string): Promise<string> {
+  const snap = await db.collection('users').doc(uid).get();
+  const key = snap.data()?.openrouterKey as string | undefined;
+  if (!key) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'OpenRouter-Key fehlt — bitte in den Settings hinterlegen'
+    );
+  }
+  return key;
 }
 
 export function parseJson<T>(raw: string): T {

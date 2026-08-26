@@ -26,13 +26,11 @@ storage.rules
 3. **Authentication** → Sign-in method → **Google** + **Anonym** aktivieren.
 4. **Firestore** → Datenbank erstellen (Location z.B. `europe-west3`).
 
-## OpenRouter-Key
+## OpenRouter-Key (BYOK)
 
-```bash
-firebase functions:secrets:set OPENROUTER_API_KEY
-```
+Jeder Nutzer trägt seinen **eigenen** OpenRouter-Key in den App-Settings ein. Kosten laufen pro Nutzer über dessen Account — kein geteilter Key, kein Server-Secret nötig.
 
-Key von https://openrouter.ai (Account → API Keys). Wird nie ins Frontend geschrieben.
+Key von https://openrouter.ai (Account → API Keys). Der Key wird in Firestore (`users/{uid}.openrouterKey`, nur für den Besitzer lesbar) gespeichert und serverseitig von den Cloud Functions gelesen — nie ins Frontend-Logik geschrieben, nie geteilt.
 
 ## Lokal entwickeln
 
