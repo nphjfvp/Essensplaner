@@ -109,6 +109,18 @@ nav a {
   gap: 4px;
 }
 
+.new-folder {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.new-folder input {
+  margin-bottom: 0;
+  flex: 1;
+}
+
 .cards {
   display: grid;
   gap: 12px;
@@ -150,4 +162,71 @@ nav a {
   margin-bottom: 4px;
   font-size: 13px;
   color: #555;
+}
+
+.divider {
+  color: #888;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.code-box {
+  border: 1px dashed #2e7d32;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f1f8e9;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.code-box strong {
+  font-size: 20px;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+
+.warn {
+  color: #b00020;
+  font-size: 12px;
+  margin: 0;
+}
+
+.thumbs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.thumb {
+  position: relative;
+}
+
+.thumb img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.thumb .x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  line-height: 1;
+  background: #b00020;
+  color: #fff;
+  border: none;
+  font-size: 14px;
+}
+
+.thumbs .clear {
+  align-self: center;
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
-import { DEFAULT_MODELS, MODEL_OPTIONS } from '../lib/models';
+import { DEFAULT_MODELS, MODEL_OPTIONS, sanitizeSettings } from '../lib/models';
 import { getApiKey, saveApiKey } from '../lib/openrouter';
 import type { ModelSettings } from '../lib/types';
 
@@ -19,12 +19,13 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<ModelSettings>({ ...DEFAULT_MODELS });
   const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     if (!user) return;
     getDoc(doc(db, 'users', user.uid)).then((snap) => {
       const d = snap.data();
-      if (d?.settings) setSettings({ ...DEFAULT_MODELS, ...d.settings });
+      if (d?.settings) setSettings(sanitizeSettings(d.settings));
       const k = getApiKey();
       if (k) setApiKey(k);
     });
@@ -32,10 +33,15 @@ export default function SettingsPage() {
 
   const save = async () => {
     if (!user) return;
+    setSaveError('');
     saveApiKey(apiKey);
-    await setDoc(doc(db, 'users', user.uid), { settings }, { merge: true });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await setDoc(doc(db, 'users', user.uid), { settings }, { merge: true });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      setSaveError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
   };
 
   return (
@@ -71,6 +77,7 @@ export default function SettingsPage() {
         </div>
       ))}
 
+      {saveError && <div className="error">{saveError}</div>}
       <button className="primary" onClick={save}>
         {saved ? 'Gespeichert ✓' : 'Speichern'}
       </button>

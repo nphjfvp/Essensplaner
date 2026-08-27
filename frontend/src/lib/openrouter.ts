@@ -52,7 +52,11 @@ export function parseJson<T>(raw: string): T {
   if (start === -1 || end === -1) {
     throw new Error('Kein JSON im Modell-Output gefunden');
   }
-  return JSON.parse(cleaned.slice(start, end + 1)) as T;
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1)) as T;
+  } catch {
+    throw new Error('Modell-Antwort war kein gültiges JSON (evtl. abgeschnitten) — bitte erneut versuchen');
+  }
 }
 
 // BYOK: Key liegt nur lokal im Browser (localStorage) — nie im Code, nie auf dem Server.

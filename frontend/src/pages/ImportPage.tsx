@@ -5,9 +5,10 @@ import { useAuth } from '../auth/AuthContext';
 import { extractRecipe } from '../lib/extract';
 import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
 import { getApiKey } from '../lib/openrouter';
-import { DEFAULT_MODELS } from '../lib/models';
+import { DEFAULT_MODELS, sanitizeSettings } from '../lib/models';
 import type { Recipe, Nutrition, KcalBucket, SourceType, ModelSettings } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
+import { useFolders } from '../lib/useFolders';
 
 type Mode = 'url' | 'text' | 'image';
 
@@ -22,30 +23,15 @@ async function loadSettings(uid: string): Promise<ModelSettings> {
   try {
     const snap = await getDoc(doc(db, 'users', uid));
     const d = snap.data();
-    if (d?.settings) return { ...DEFAULT_MODELS, ...d.settings };
+    if (d?.settings) return sanitizeSettings(d.settings);
   } catch {
     // Fallback auf Defaults
   }
   return { ...DEFAULT_MODELS };
 }
 
-export default function ImportPage() {
-  const { user } = useAuth();
-  const [mode, setMode] = useState<Mode>('url');
-  const [url, setUrl] = useState('');
-  const [text, setText] = useState('');
-  const [imageDataUrl, setImageDataUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const [draft, setDraft] = useState<Recipe | null>(null);
-  const [nutrition, setNutrition] = useState<Nutrition | null>(null);
-  const [folders, setFolders] = useState<string[]>([]);
-  const [kcalBucket, setKcalBucket] = useState<KcalBucket | undefined>();
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
@@ -55,11 +41,42 @@ export default function ImportPage() {
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
-        setImageDataUrl(canvas.toDataURL('image/jpeg', 0.8));
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
+      img.onerror = () => reject(new Error('Bild nicht lesbar'));
       img.src = reader.result as string;
     };
+    reader.onerror = () => reject(new Error('Bild nicht lesbar'));
     reader.readAsDataURL(file);
+  });
+}
+
+export default function ImportPage() {
+  const { user } = useAuth();
+  const [mode, setMode] = useState<Mode>('url');
+  const [url, setUrl] = useState('');
+  const [text, setText] = useState('');
+  const [imageDataUrls, setImageDataUrls] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const [draft, setDraft] = useState<Recipe | null>(null);
+  const [nutrition, setNutrition] = useState<Nutrition | null>(null);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [kcalBucket, setKcalBucket] = useState<KcalBucket | undefined>();
+  const [newFolder, setNewFolder] = useState('');
+  const { all: allFolders, create } = useFolders(user?.uid);
+
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const urls = await Promise.all(files.map(fileToDataUrl));
+    setImageDataUrls((prev) => [...prev, ...urls]);
+    e.target.value = '';
+  };
+
+  const removeImage = (i: number) => {
+    setImageDataUrls((prev) => prev.filter((_, idx) => idx !== i));
   };
 
   const runImport = async () => {
@@ -76,7 +93,7 @@ export default function ImportPage() {
         sourceType,
         url: mode === 'url' ? url : undefined,
         text: mode === 'text' ? text : undefined,
-        imageDataUrl: mode === 'image' ? imageDataUrl : undefined,
+        imageDataUrls: mode === 'image' ? imageDataUrls : undefined,
         model: settings.extract,
         visionModel: settings.vision,
         apiKey,
@@ -86,8 +103,8 @@ export default function ImportPage() {
         ...rest,
         ownerId: user.uid,
         source_type: sourceType,
-        source_url: sourceUrl,
         folders: [],
+        ...(sourceUrl ? { source_url: sourceUrl } : {}),
       };
       setDraft(recipe);
 
@@ -107,26 +124,36 @@ export default function ImportPage() {
 
   const save = async () => {
     if (!draft || !user) return;
-    await addDoc(collection(db, 'recipes'), {
-      ...draft,
-      estimated_nutrition: nutrition ?? null,
-      estimated_price: nutrition?.price_eur ?? null,
-      folders,
-      kcal_bucket: kcalBucket ?? null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    setDraft(null);
-    setNutrition(null);
-    setFolders([]);
-    setKcalBucket(undefined);
-    setUrl('');
-    setText('');
-    setImageDataUrl('');
+    setError('');
+    try {
+      await addDoc(collection(db, 'recipes'), {
+        ...draft,
+        estimated_nutrition: nutrition ?? null,
+        estimated_price: nutrition?.price_eur ?? null,
+        folders,
+        kcal_bucket: kcalBucket ?? null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      setDraft(null);
+      setNutrition(null);
+      setFolders([]);
+      setKcalBucket(undefined);
+      setUrl('');
+      setText('');
+      setImageDataUrls([]);
+    } catch (err: any) {
+      setError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
   };
 
   const toggleFolder = (f: string) => {
     setFolders((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  };
+
+  const addFolder = async () => {
+    await create(newFolder);
+    setNewFolder('');
   };
 
   return (
@@ -156,7 +183,26 @@ export default function ImportPage() {
           rows={6}
         />
       )}
-      {mode === 'image' && <input type="file" accept="image/*" onChange={handleFile} />}
+      {mode === 'image' && (
+        <>
+          <input type="file" accept="image/*" multiple onChange={handleFiles} />
+          {imageDataUrls.length > 0 && (
+            <div className="thumbs">
+              {imageDataUrls.map((u, i) => (
+                <div className="thumb" key={i}>
+                  <img src={u} alt={`Bild ${i + 1}`} />
+                  <button className="x" onClick={() => removeImage(i)}>
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button className="clear" onClick={() => setImageDataUrls([])}>
+                Alle entfernen
+              </button>
+            </div>
+          )}
+        </>
+      )}
 
       <button className="primary" onClick={runImport} disabled={loading}>
         {loading ? 'Importiere…' : 'Importieren'}
@@ -201,7 +247,7 @@ export default function ImportPage() {
 
           <h4>Ordner</h4>
           <div className="folders">
-            {DEFAULT_FOLDERS.map((f) => (
+            {allFolders.map((f) => (
               <label key={f}>
                 <input
                   type="checkbox"
@@ -211,6 +257,16 @@ export default function ImportPage() {
                 {f}
               </label>
             ))}
+          </div>
+          <div className="new-folder">
+            <input
+              placeholder="Neuer Ordner…"
+              value={newFolder}
+              onChange={(e) => setNewFolder(e.target.value)}
+            />
+            <button onClick={addFolder} disabled={!newFolder.trim()}>
+              Ordner anlegen
+            </button>
           </div>
           {kcalBucket && <p>kcal-Bucket: {kcalBucket}</p>}
 

@@ -13,33 +13,59 @@ export interface ExtractInput {
   sourceType: SourceType;
   url?: string;
   text?: string;
-  imageDataUrl?: string;
+  imageDataUrls?: string[];
   model: string;
   visionModel: string;
   apiKey: string;
 }
 
 export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecipe & { sourceUrl?: string }> {
-  const { sourceType, url, text, imageDataUrl, model, visionModel, apiKey } = input;
+  const { sourceType, url, text, imageDataUrls, model, visionModel, apiKey } = input;
 
-  // 1) Blog-URL: erst Schema.org JSON-LD versuchen (kein API-Key nötig)
+  // 1) Blog-URL: erst Schema.org JSON-LD, sonst Seitentext ans LLM
   if (url && sourceType === 'blog') {
-    const structured = await tryJsonLd(url);
-    if (structured) return { ...structured, sourceUrl: url };
+    const html = await fetchHtml(url);
+    if (html) {
+      const structured = parseJsonLd(html);
+      if (structured) return { ...structured, sourceUrl: url };
+
+      const raw = await chatCompletion(
+        {
+          model,
+          messages: [
+            { role: 'system', content: EXTRACT_PROMPT },
+            { role: 'user', content: stripHtml(html).slice(0, 8000) },
+          ],
+          jsonMode: true,
+        },
+        apiKey
+      );
+      return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
+    }
+    throw new Error('URL nicht lesbar — bitte den Rezepttext als Text einfügen');
   }
 
-  // 2) Bild-Input: Vision-Modell
-  if (imageDataUrl) {
+  // Instagram/TikTok/YouTube: kein zuverlässiges Scraping
+  if (url) {
+    throw new Error('Diese Quelle kann nicht automatisch gelesen werden — bitte den Rezepttext einfügen');
+  }
+
+  // 2) Bild-Input: Vision-Modell (mehrere Bilder = zusammengehörige Screenshots)
+  if (imageDataUrls && imageDataUrls.length > 0) {
     const raw = await chatCompletion(
       {
         model: visionModel,
+        maxTokens: 12000,
         messages: [
           { role: 'system', content: EXTRACT_PROMPT },
           {
             role: 'user',
             content: [
-              { type: 'text', text: 'Extrahiere das Rezept aus diesem Bild.' },
-              { type: 'image_url', image_url: { url: imageDataUrl } },
+              {
+                type: 'text',
+                text: `Extrahiere das Rezept aus diesen ${imageDataUrls.length} Bildern (zusammengehörige Screenshots).`,
+              },
+              ...imageDataUrls.map((u) => ({ type: 'image_url', image_url: { url: u } } as const)),
             ],
           },
         ],
@@ -69,26 +95,31 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
   throw new Error('Keine Quelle angegeben (url/text/image)');
 }
 
-async function tryJsonLd(url: string): Promise<ExtractedRecipe | null> {
-  // Direkt versuchen; bei CORS-Fehler über freien Proxy.
-  const candidates = [url, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
+// Direkt versuchen; bei CORS-Fehler über freie Proxies.
+async function fetchHtml(url: string): Promise<string | null> {
+  const candidates = [
+    url,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  ];
   for (const src of candidates) {
-    const html = await fetchText(src);
-    if (!html) continue;
-    const recipe = parseJsonLd(html);
-    if (recipe) return recipe;
+    try {
+      const res = await fetch(src);
+      if (res.ok) return await res.text();
+    } catch {
+      // weiter zum nächsten Kandidaten
+    }
   }
   return null;
 }
 
-async function fetchText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parseJsonLd(html: string): ExtractedRecipe | null {

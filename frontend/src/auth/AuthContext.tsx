@@ -1,19 +1,21 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   GoogleAuthProvider,
-  linkWithPopup,
   onAuthStateChanged,
-  signInAnonymously,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   type User,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { normalizeCode, codeToEmail } from '../lib/code';
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   signInGoogle: () => Promise<void>;
-  signInAnon: () => Promise<void>;
+  createAccountWithCode: (rawCode: string) => Promise<void>;
+  signInWithCode: (code: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -32,17 +34,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInGoogle = async () => {
-    const provider = new GoogleAuthProvider();
-    // Anonymen User erhalten: Google-Konto verknüpfen statt überschreiben
-    if (auth.currentUser?.isAnonymous) {
-      await linkWithPopup(auth.currentUser, provider);
-    } else {
-      await signInWithPopup(auth, provider);
-    }
+    await signInWithPopup(auth, new GoogleAuthProvider());
   };
 
-  const signInAnon = async () => {
-    await signInAnonymously(auth);
+  const createAccountWithCode = async (rawCode: string) => {
+    await createUserWithEmailAndPassword(auth, codeToEmail(rawCode), rawCode);
+  };
+
+  const signInWithCode = async (code: string) => {
+    const raw = normalizeCode(code);
+    await signInWithEmailAndPassword(auth, codeToEmail(raw), raw);
   };
 
   const signOut = async () => {
@@ -50,7 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInGoogle, signInAnon, signOut }}>
+    <AuthContext.Provider
+      value={{ user, loading, signInGoogle, createAccountWithCode, signInWithCode, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   );
