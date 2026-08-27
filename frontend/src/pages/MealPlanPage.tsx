@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Recipe } from '../lib/types';
@@ -10,7 +10,7 @@ export default function MealPlanPage() {
   const { user } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [plan, setPlan] = useState<Record<number, string>>({});
-  const [shopping, setShopping] = useState<{ name: string }[]>([]);
+  const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -32,7 +32,12 @@ export default function MealPlanPage() {
 
     const q3 = query(collection(db, 'shopping'), where('ownerId', '==', user.uid));
     const unsub3 = onSnapshot(q3, (snap) =>
-      setShopping(snap.docs.map((d) => ({ name: d.data().name as string })))
+      setShopping(
+        snap.docs.map((d) => {
+          const data = d.data();
+          return { id: d.id, name: data.name as string, amount: data.amount as number | undefined, unit: data.unit as string | undefined };
+        })
+      )
     );
 
     return () => {
@@ -61,39 +66,45 @@ export default function MealPlanPage() {
 
   const totalKcal = plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0);
 
+  // Name+Einheit als Schlüssel: unterschiedliche Einheiten werden nicht vermischt,
+  // sondern als eigene Positionen behandelt (statt eine davon still zu verwerfen).
+  const shoppingKey = (name: string, unit: string) => `${name.trim().toLowerCase()}|${unit.trim().toLowerCase()}`;
+
   const addWeekToShopping = async () => {
     if (!user || !plannedRecipes.length) return;
     const agg = new Map<string, { name: string; amount: number; unit: string }>();
     for (const r of plannedRecipes) {
       for (const ing of r.ingredients) {
-        const key = ing.name.trim().toLowerCase();
+        const key = shoppingKey(ing.name, ing.unit);
         const existing = agg.get(key);
-        if (!existing) {
-          agg.set(key, { name: ing.name.trim(), amount: ing.amount, unit: ing.unit });
-        } else if (existing.unit === ing.unit) {
+        if (existing) {
           existing.amount += ing.amount;
+        } else {
+          agg.set(key, { name: ing.name.trim(), amount: ing.amount, unit: ing.unit });
         }
       }
     }
 
-    const existingNames = new Set(shopping.map((s) => s.name.trim().toLowerCase()));
+    const existingByKey = new Map(shopping.map((s) => [shoppingKey(s.name, s.unit ?? ''), s]));
     let added = 0;
-    let skipped = 0;
+    let merged = 0;
     for (const v of agg.values()) {
-      if (existingNames.has(v.name.trim().toLowerCase())) {
-        skipped++;
-        continue;
+      const existing = existingByKey.get(shoppingKey(v.name, v.unit));
+      if (existing) {
+        await updateDoc(doc(db, 'shopping', existing.id), { amount: (existing.amount ?? 0) + v.amount });
+        merged++;
+      } else {
+        await addDoc(collection(db, 'shopping'), {
+          ownerId: user.uid,
+          name: v.name,
+          amount: v.amount,
+          unit: v.unit,
+          done: false,
+        });
+        added++;
       }
-      await addDoc(collection(db, 'shopping'), {
-        ownerId: user.uid,
-        name: v.name,
-        amount: v.amount,
-        unit: v.unit,
-        done: false,
-      });
-      added++;
     }
-    setStatus(`${added} Zutat(en) hinzugefügt${skipped ? `, ${skipped} schon auf der Liste` : ''}.`);
+    setStatus(`${added} Zutat(en) hinzugefügt${merged ? `, ${merged} Menge(n) aktualisiert` : ''}.`);
   };
 
   return (

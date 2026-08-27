@@ -7,39 +7,51 @@ service cloud.firestore {
     function isOwner() {
       return signedIn() && request.resource.data.ownerId == request.auth.uid;
     }
+    function isCurrentOwner() {
+      return signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+    // Update: Anfrage muss vom aktuellen Owner kommen UND ownerId darf sich nicht ändern.
+    function isOwnerUpdate() {
+      return isCurrentOwner() && request.resource.data.ownerId == resource.data.ownerId;
+    }
 
     match /users/{uid} {
       allow read, write: if signedIn() && uid == request.auth.uid;
     }
 
     match /folders/{folderId} {
-      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isCurrentOwner();
       allow create: if isOwner();
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
     }
 
     match /recipes/{recipeId} {
-      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isCurrentOwner();
       allow create: if isOwner();
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
     }
 
     match /mealplan/{mealId} {
-      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isCurrentOwner();
       allow create: if isOwner();
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
     }
 
     match /pantry/{itemId} {
-      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isCurrentOwner();
       allow create: if isOwner();
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
     }
 
     match /shopping/{itemId} {
-      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isCurrentOwner();
       allow create: if isOwner();
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
     }
   }
 }
