@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
-import type { Recipe } from '../lib/types';
+import type { Ingredient, Recipe } from '../lib/types';
 import { useFolders } from '../lib/useFolders';
 import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
@@ -21,6 +21,7 @@ export default function RecipesPage() {
   const [editServings, setEditServings] = useState('');
   const [editSteps, setEditSteps] = useState('');
   const [editFolders, setEditFolders] = useState<string[]>([]);
+  const [editIngredients, setEditIngredients] = useState<Ingredient[]>([]);
   const [error, setError] = useState('');
 
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -62,6 +63,7 @@ export default function RecipesPage() {
     setEditServings(String(selected.servings));
     setEditSteps(selected.steps.join('\n'));
     setEditFolders(selected.folders);
+    setEditIngredients(selected.ingredients.map((i) => ({ ...i })));
     setEditing(true);
   };
 
@@ -70,9 +72,13 @@ export default function RecipesPage() {
     setError('');
     try {
       const steps = editSteps.split('\n').map((s) => s.trim()).filter(Boolean);
+      const ingredients = editIngredients
+        .map((ing) => ({ ...ing, name: ing.name.trim(), amount: Number(ing.amount) || 0 }))
+        .filter((ing) => ing.name !== '');
       await updateDoc(doc(db, 'recipes', selected.id), {
         title: editTitle,
         servings: Number(editServings) || 1,
+        ingredients,
         steps,
         folders: editFolders,
         updatedAt: Date.now(),
@@ -162,6 +168,25 @@ export default function RecipesPage() {
 
   const toggleEditFolder = (f: string) => {
     setEditFolders((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  };
+
+  const updateIngredient = (i: number, field: 'name' | 'amount' | 'unit', value: string) => {
+    setEditIngredients((prev) =>
+      prev.map((ing, idx) => {
+        if (idx !== i) return ing;
+        if (field === 'amount') return { ...ing, amount: Number(value) || 0 };
+        if (field === 'unit') return { ...ing, unit: value };
+        return { ...ing, name: value };
+      })
+    );
+  };
+
+  const removeIngredient = (i: number) => {
+    setEditIngredients((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  const addIngredient = () => {
+    setEditIngredients((prev) => [...prev, { name: '', amount: 0, unit: '' }]);
   };
 
   return (
@@ -328,6 +353,31 @@ export default function RecipesPage() {
               value={editServings}
               onChange={(e) => setEditServings(e.target.value)}
             />
+          </div>
+          <div className="field">
+            <label>Zutaten</label>
+            {editIngredients.map((ing, i) => (
+              <div className="ingredient-row" key={i}>
+                <input
+                  placeholder="Zutat"
+                  value={ing.name}
+                  onChange={(e) => updateIngredient(i, 'name', e.target.value)}
+                />
+                <input
+                  type="number"
+                  placeholder="Menge"
+                  value={ing.amount || ''}
+                  onChange={(e) => updateIngredient(i, 'amount', e.target.value)}
+                />
+                <input
+                  placeholder="Einheit"
+                  value={ing.unit}
+                  onChange={(e) => updateIngredient(i, 'unit', e.target.value)}
+                />
+                <button onClick={() => removeIngredient(i)}>×</button>
+              </div>
+            ))}
+            <button onClick={addIngredient}>Zutat hinzufügen</button>
           </div>
           <div className="field">
             <label>Zubereitung (ein Schritt pro Zeile)</label>

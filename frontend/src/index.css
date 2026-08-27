@@ -164,6 +164,18 @@ nav a {
   color: #555;
 }
 
+.ingredient-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ingredient-row input {
+  margin-bottom: 0;
+}
+
 .divider {
   color: #888;
   font-size: 13px;
