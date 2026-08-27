@@ -11,6 +11,7 @@ export default function MealPlanPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [plan, setPlan] = useState<Record<number, string>>({});
   const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
+  const [pantry, setPantry] = useState<{ name: string }[]>([]);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -40,10 +41,16 @@ export default function MealPlanPage() {
       )
     );
 
+    const q4 = query(collection(db, 'pantry'), where('ownerId', '==', user.uid));
+    const unsub4 = onSnapshot(q4, (snap) =>
+      setPantry(snap.docs.map((d) => ({ name: d.data().name as string })))
+    );
+
     return () => {
       unsub1();
       unsub2();
       unsub3();
+      unsub4();
     };
   }, [user]);
 
@@ -66,6 +73,17 @@ export default function MealPlanPage() {
 
   const totalKcal = plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0);
 
+  const pantryHits = useMemo(() => {
+    const pantryNames = new Set(pantry.map((p) => p.name.trim().toLowerCase()));
+    const names = new Set<string>();
+    for (const r of plannedRecipes) {
+      for (const ing of r.ingredients) {
+        if (pantryNames.has(ing.name.trim().toLowerCase())) names.add(ing.name.trim());
+      }
+    }
+    return Array.from(names);
+  }, [plannedRecipes, pantry]);
+
   // Name+Einheit als Schlüssel: unterschiedliche Einheiten werden nicht vermischt,
   // sondern als eigene Positionen behandelt (statt eine davon still zu verwerfen).
   const shoppingKey = (name: string, unit: string) => `${name.trim().toLowerCase()}|${unit.trim().toLowerCase()}`;
@@ -85,10 +103,16 @@ export default function MealPlanPage() {
       }
     }
 
+    const pantryNames = new Set(pantry.map((p) => p.name.trim().toLowerCase()));
     const existingByKey = new Map(shopping.map((s) => [shoppingKey(s.name, s.unit ?? ''), s]));
     let added = 0;
     let merged = 0;
+    let inPantry = 0;
     for (const v of agg.values()) {
+      if (pantryNames.has(v.name.trim().toLowerCase())) {
+        inPantry++;
+        continue;
+      }
       const existing = existingByKey.get(shoppingKey(v.name, v.unit));
       if (existing) {
         await updateDoc(doc(db, 'shopping', existing.id), { amount: (existing.amount ?? 0) + v.amount });
@@ -104,7 +128,12 @@ export default function MealPlanPage() {
         added++;
       }
     }
-    setStatus(`${added} Zutat(en) hinzugefügt${merged ? `, ${merged} Menge(n) aktualisiert` : ''}.`);
+    setStatus(
+      `${added} Zutat(en) hinzugefügt` +
+        (merged ? `, ${merged} Menge(n) aktualisiert` : '') +
+        (inPantry ? `, ${inPantry} schon im Vorrat übersprungen` : '') +
+        '.'
+    );
   };
 
   return (
@@ -116,6 +145,9 @@ export default function MealPlanPage() {
       <button className="primary" onClick={addWeekToShopping} disabled={!plannedRecipes.length}>
         Zutaten der Woche auf Einkaufsliste
       </button>
+      {pantryHits.length > 0 && (
+        <p className="meta">Schon im Vorrat (wird nicht hinzugefügt): {pantryHits.join(', ')}</p>
+      )}
       {status && <p className="meta">{status}</p>}
 
       {DAYS.map((label, day) => {
