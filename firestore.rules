@@ -23,5 +23,23 @@ service cloud.firestore {
       allow create: if isOwner();
       allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
     }
+
+    match /mealplan/{mealId} {
+      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner();
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /pantry/{itemId} {
+      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner();
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /shopping/{itemId} {
+      allow read: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner();
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
   }
 }

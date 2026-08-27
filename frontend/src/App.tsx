@@ -4,6 +4,8 @@ import LoginPage from './pages/LoginPage';
 import ImportPage from './pages/ImportPage';
 import RecipesPage from './pages/RecipesPage';
 import SettingsPage from './pages/SettingsPage';
+import MealPlanPage from './pages/MealPlanPage';
+import PantryPage from './pages/PantryPage';
 
 function Shell() {
   const { user, loading, signOut } = useAuth();
@@ -16,12 +18,16 @@ function Shell() {
       <nav>
         <Link to="/recipes">Rezepte</Link>
         <Link to="/import">Import</Link>
+        <Link to="/plan">Wochenplan</Link>
+        <Link to="/pantry">Vorrat & Einkauf</Link>
         <Link to="/settings">Settings</Link>
         <button onClick={signOut}>Logout</button>
       </nav>
       <Routes>
         <Route path="/import" element={<ImportPage />} />
         <Route path="/recipes" element={<RecipesPage />} />
+        <Route path="/plan" element={<MealPlanPage />} />
+        <Route path="/pantry" element={<PantryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/recipes" />} />
       </Routes>

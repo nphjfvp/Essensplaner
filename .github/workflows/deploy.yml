@@ -23,6 +23,6 @@ jobs:
         working-directory: frontend
 
       - name: Deploy
-        run: npx -y firebase-tools deploy --only hosting
+        run: npx -y firebase-tools deploy --only hosting,firestore:rules
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
