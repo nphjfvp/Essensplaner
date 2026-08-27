@@ -13,6 +13,8 @@ interface ShopItem {
   id?: string;
   ownerId: string;
   name: string;
+  amount?: number;
+  unit?: string;
   done: boolean;
 }
 
@@ -108,7 +110,10 @@ export default function PantryPage() {
           <li key={it.id}>
             <label>
               <input type="checkbox" checked={it.done} onChange={() => toggleShop(it)} />
-              <span style={{ textDecoration: it.done ? 'line-through' : 'none' }}>{it.name}</span>
+              <span style={{ textDecoration: it.done ? 'line-through' : 'none' }}>
+                {it.amount ? `${it.amount} ${it.unit} ` : ''}
+                {it.name}
+              </span>
             </label>
             <button onClick={() => removeShop(it.id)}>×</button>
           </li>

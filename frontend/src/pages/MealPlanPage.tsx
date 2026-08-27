@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { useEffect, useMemo, useState } from 'react';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Recipe } from '../lib/types';
@@ -10,6 +10,8 @@ export default function MealPlanPage() {
   const { user } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [plan, setPlan] = useState<Record<number, string>>({});
+  const [shopping, setShopping] = useState<{ name: string }[]>([]);
+  const [status, setStatus] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -28,9 +30,15 @@ export default function MealPlanPage() {
       setPlan(m);
     });
 
+    const q3 = query(collection(db, 'shopping'), where('ownerId', '==', user.uid));
+    const unsub3 = onSnapshot(q3, (snap) =>
+      setShopping(snap.docs.map((d) => ({ name: d.data().name as string })))
+    );
+
     return () => {
       unsub1();
       unsub2();
+      unsub3();
     };
   }, [user]);
 
@@ -43,9 +51,62 @@ export default function MealPlanPage() {
     }
   };
 
+  const plannedRecipes = useMemo(
+    () =>
+      Object.values(plan)
+        .map((rid) => recipes.find((r) => r.id === rid))
+        .filter((r): r is Recipe => Boolean(r)),
+    [plan, recipes]
+  );
+
+  const totalKcal = plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0);
+
+  const addWeekToShopping = async () => {
+    if (!user || !plannedRecipes.length) return;
+    const agg = new Map<string, { name: string; amount: number; unit: string }>();
+    for (const r of plannedRecipes) {
+      for (const ing of r.ingredients) {
+        const key = ing.name.trim().toLowerCase();
+        const existing = agg.get(key);
+        if (!existing) {
+          agg.set(key, { name: ing.name.trim(), amount: ing.amount, unit: ing.unit });
+        } else if (existing.unit === ing.unit) {
+          existing.amount += ing.amount;
+        }
+      }
+    }
+
+    const existingNames = new Set(shopping.map((s) => s.name.trim().toLowerCase()));
+    let added = 0;
+    let skipped = 0;
+    for (const v of agg.values()) {
+      if (existingNames.has(v.name.trim().toLowerCase())) {
+        skipped++;
+        continue;
+      }
+      await addDoc(collection(db, 'shopping'), {
+        ownerId: user.uid,
+        name: v.name,
+        amount: v.amount,
+        unit: v.unit,
+        done: false,
+      });
+      added++;
+    }
+    setStatus(`${added} Zutat(en) hinzugefügt${skipped ? `, ${skipped} schon auf der Liste` : ''}.`);
+  };
+
   return (
     <div className="page">
       <h2>Wochenplan</h2>
+
+      {totalKcal > 0 && <p>🔥 Wochensumme: {totalKcal} kcal</p>}
+
+      <button className="primary" onClick={addWeekToShopping} disabled={!plannedRecipes.length}>
+        Zutaten der Woche auf Einkaufsliste
+      </button>
+      {status && <p className="meta">{status}</p>}
+
       {DAYS.map((label, day) => {
         const r = recipes.find((x) => x.id === plan[day]);
         return (
