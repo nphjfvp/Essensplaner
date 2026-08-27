@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Recipe } from '../lib/types';
 import { useFolders } from '../lib/useFolders';
+import { getApiKey } from '../lib/openrouter';
+import { loadSettings } from '../lib/settings';
+import { adjustRecipe, type AdjustedRecipe } from '../lib/adjust';
+import { reviewRecipe } from '../lib/review';
 
 export default function RecipesPage() {
   const { user } = useAuth();
@@ -18,6 +22,16 @@ export default function RecipesPage() {
   const [editSteps, setEditSteps] = useState('');
   const [editFolders, setEditFolders] = useState<string[]>([]);
   const [error, setError] = useState('');
+
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [adjustResult, setAdjustResult] = useState<AdjustedRecipe | null>(null);
+  const [adjustLoading, setAdjustLoading] = useState(false);
+  const [adjustError, setAdjustError] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewResult, setReviewResult] = useState('');
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -34,6 +48,12 @@ export default function RecipesPage() {
     setSelectedId(r.id ?? null);
     setEditing(false);
     setError('');
+    setAdjustOpen(false);
+    setAdjustResult(null);
+    setAdjustError('');
+    setReviewOpen(false);
+    setReviewResult('');
+    setReviewError('');
   };
 
   const startEdit = () => {
@@ -68,6 +88,76 @@ export default function RecipesPage() {
     if (!window.confirm('Rezept wirklich löschen?')) return;
     await deleteDoc(doc(db, 'recipes', selected.id));
     setSelectedId(null);
+  };
+
+  const runAdjust = async () => {
+    if (!selected || !user || !instruction.trim()) return;
+    setAdjustLoading(true);
+    setAdjustError('');
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
+      const settings = await loadSettings(user.uid);
+      const result = await adjustRecipe(selected, instruction.trim(), apiKey, settings.adjust);
+      setAdjustResult(result);
+    } catch (err: any) {
+      setAdjustError(err?.message ?? 'Anpassung fehlgeschlagen');
+    } finally {
+      setAdjustLoading(false);
+    }
+  };
+
+  const applyAdjust = async () => {
+    if (!selected?.id || !adjustResult) return;
+    setError('');
+    try {
+      await updateDoc(doc(db, 'recipes', selected.id), {
+        ...adjustResult,
+        updatedAt: Date.now(),
+      });
+      setAdjustResult(null);
+      setAdjustOpen(false);
+      setInstruction('');
+    } catch (err: any) {
+      setError(err?.message ?? 'Übernehmen fehlgeschlagen');
+    }
+  };
+
+  const saveAdjustAsNew = async () => {
+    if (!selected || !adjustResult || !user) return;
+    setError('');
+    try {
+      await addDoc(collection(db, 'recipes'), {
+        ...adjustResult,
+        ownerId: user.uid,
+        source_type: 'manual',
+        folders: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      setAdjustResult(null);
+      setAdjustOpen(false);
+      setInstruction('');
+    } catch (err: any) {
+      setError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
+  };
+
+  const runReview = async () => {
+    if (!selected || !user) return;
+    setReviewLoading(true);
+    setReviewError('');
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
+      const settings = await loadSettings(user.uid);
+      const text = await reviewRecipe(selected, apiKey, settings.review);
+      setReviewResult(text);
+    } catch (err: any) {
+      setReviewError(err?.message ?? 'Review fehlgeschlagen');
+    } finally {
+      setReviewLoading(false);
+    }
   };
 
   const toggleEditFolder = (f: string) => {
@@ -160,6 +250,67 @@ export default function RecipesPage() {
             Bearbeiten
           </button>
           <button onClick={del}>Löschen</button>
+          <button onClick={() => setReviewOpen((v) => !v)}>Review</button>
+          <button onClick={() => setAdjustOpen((v) => !v)}>Anpassen</button>
+
+          {reviewOpen && (
+            <div className="field">
+              <button className="primary" onClick={runReview} disabled={reviewLoading}>
+                {reviewLoading ? 'Prüfe…' : 'Review starten'}
+              </button>
+              {reviewError && <div className="error">{reviewError}</div>}
+            </div>
+          )}
+
+          {reviewResult && (
+            <div className="draft">
+              <h4>Review</h4>
+              <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{reviewResult}</pre>
+            </div>
+          )}
+
+          {adjustOpen && (
+            <div className="field">
+              <textarea
+                placeholder='Anweisung, z.B. "vegan machen", "doppelte Portion", "mehr Protein"'
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                rows={2}
+              />
+              <button className="primary" onClick={runAdjust} disabled={adjustLoading || !instruction.trim()}>
+                {adjustLoading ? 'Passe an…' : 'Anpassen'}
+              </button>
+              {adjustError && <div className="error">{adjustError}</div>}
+            </div>
+          )}
+
+          {adjustResult && (
+            <div className="draft">
+              <h4>Angepasst: {adjustResult.title}</h4>
+              <p>{adjustResult.servings} Portionen</p>
+              <h4>Zutaten</h4>
+              <ul>
+                {adjustResult.ingredients.map((ing, i) => (
+                  <li key={i}>
+                    {ing.amount > 0 && `${ing.amount} ${ing.unit} `}
+                    {ing.name}
+                  </li>
+                ))}
+              </ul>
+              <h4>Zubereitung</h4>
+              <ol>
+                {adjustResult.steps.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ol>
+              <button className="primary" onClick={applyAdjust}>
+                Übernehmen
+              </button>
+              <button className="primary" onClick={saveAdjustAsNew}>
+                Als neues Rezept speichern
+              </button>
+            </div>
+          )}
         </div>
       )}
 

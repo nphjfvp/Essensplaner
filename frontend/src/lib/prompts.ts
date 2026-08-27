@@ -55,3 +55,26 @@ Regeln:
 
 Rezept:
 `;
+
+export const ADJUST_PROMPT = `Du bist ein Rezept-Editor. Passe das Rezept gemäß der Anweisung des Nutzers an.
+
+Antworte NUR mit einem JSON-Objekt im Format:
+{
+  "title": string,
+  "servings": number,
+  "ingredients": [{ "name": string, "amount": number, "unit": string }],
+  "steps": [string]
+}
+
+Regeln:
+- amount als Zahl (0 wenn keine Menge). unit als String ("g", "ml", "Stück", "EL", "TL", "" etc.)
+- Gib das KOMPLETTE angepasste Rezept zurück, nicht nur die Änderungen
+- Passe Mengen sinnvoll an (z.B. bei "doppelte Portion" alle Zutaten verdoppeln)
+`;
+
+export const REVIEW_PROMPT = `Du bist ein Rezept-Reviewer. Prüfe das folgende Rezept auf Fehler und gib Verbesserungsvorschläge.
+
+Prüfe: fehlende/unklare Zutaten, unlogische Mengen, fehlende Zubereitungsschritte, unrealistische Portionen.
+
+Antworte als kurzer, strukturierter Text mit Stichpunkten. Kein JSON.
+`;

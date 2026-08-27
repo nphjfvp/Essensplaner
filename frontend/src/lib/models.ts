@@ -5,7 +5,7 @@ export const DEFAULT_MODELS: ModelSettings = {
   extract: 'google/gemini-2.5-flash',
   vision: 'google/gemini-2.5-flash',
   nutrition: 'google/gemini-2.5-flash',
-  adjust: 'anthropic/claude-sonnet-4',
+  adjust: 'google/gemini-2.5-flash',
   review: 'anthropic/claude-sonnet-4',
 };
 

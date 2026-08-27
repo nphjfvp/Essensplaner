@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { addDoc, collection, doc, getDoc } from 'firebase/firestore';
+import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import { extractRecipe } from '../lib/extract';
 import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
 import { getApiKey } from '../lib/openrouter';
-import { DEFAULT_MODELS, sanitizeSettings } from '../lib/models';
-import type { Recipe, Nutrition, KcalBucket, SourceType, ModelSettings } from '../lib/types';
+import { loadSettings } from '../lib/settings';
+import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 import { useFolders } from '../lib/useFolders';
 
@@ -17,17 +17,6 @@ function detectSourceType(u: string): SourceType {
   if (u.includes('tiktok')) return 'tiktok';
   if (u.includes('youtube') || u.includes('youtu.be')) return 'youtube';
   return 'blog';
-}
-
-async function loadSettings(uid: string): Promise<ModelSettings> {
-  try {
-    const snap = await getDoc(doc(db, 'users', uid));
-    const d = snap.data();
-    if (d?.settings) return sanitizeSettings(d.settings);
-  } catch {
-    // Fallback auf Defaults
-  }
-  return { ...DEFAULT_MODELS };
 }
 
 function fileToDataUrl(file: File): Promise<string> {
