@@ -22,7 +22,27 @@ export interface ExtractInput {
 export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecipe & { sourceUrl?: string }> {
   const { sourceType, url, text, imageDataUrls, model, visionModel, apiKey } = input;
 
-  // 1) Blog-URL: erst Schema.org JSON-LD, sonst Seitentext ans LLM
+  // 1) Text (Caption / Transcript / manuell) — hat immer Vorrang vor jedem
+  // automatischen Auslesen: wer bereits Text eingefügt hat (egal ob
+  // zusätzlich zu einem Blog- oder Instagram/TikTok/YouTube-Link, oder weil
+  // das Scrapen der URL unten fehlschlagen würde), soll nicht daran
+  // scheitern, dass die URL allein nicht lesbar ist.
+  if (text) {
+    const raw = await chatCompletion(
+      {
+        model,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          { role: 'user', content: text },
+        ],
+        jsonMode: true,
+      },
+      apiKey
+    );
+    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
+  }
+
+  // 2) Blog-URL: erst Schema.org JSON-LD, sonst Seitentext ans LLM
   if (url && sourceType === 'blog') {
     const html = await fetchHtml(url);
     if (html) {
@@ -43,25 +63,6 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
       return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
     }
     throw new Error('URL nicht lesbar — bitte den Rezepttext als Text einfügen');
-  }
-
-  // 2) Text (Caption / Transcript / manuell) — hat Vorrang vor dem
-  // "Instagram/TikTok/YouTube nicht lesbar"-Fall unten: Wer trotz einer
-  // solchen URL bereits Text eingefügt hat, soll nicht daran scheitern,
-  // dass hier vorher schon abgebrochen wird.
-  if (text) {
-    const raw = await chatCompletion(
-      {
-        model,
-        messages: [
-          { role: 'system', content: EXTRACT_PROMPT },
-          { role: 'user', content: text },
-        ],
-        jsonMode: true,
-      },
-      apiKey
-    );
-    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
   }
 
   // Instagram/TikTok/YouTube ohne Text: kein zuverlässiges Scraping möglich
@@ -166,9 +167,35 @@ export function parseServings(value: any): number {
   return 4;
 }
 
+const VULGAR_FRACTIONS: Record<string, string> = {
+  '¼': '.25', '½': '.5', '¾': '.75',
+  '⅓': '.333', '⅔': '.667',
+  '⅕': '.2', '⅖': '.4', '⅗': '.6', '⅘': '.8',
+  '⅙': '.167', '⅚': '.833',
+  '⅛': '.125', '⅜': '.375', '⅝': '.625', '⅞': '.875',
+};
+const VULGAR_FRACTION_RE = /(\d)?([¼½¾⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/g;
+
+// "1½" → "1.5", "½" → "0.5" — macht Unicode-Bruchzeichen für die normale
+// Mengen-Erkennung unten lesbar.
+function normalizeVulgarFractions(raw: string): string {
+  return raw.replace(VULGAR_FRACTION_RE, (_, digit: string | undefined, frac: string) => (digit ?? '0') + VULGAR_FRACTIONS[frac]);
+}
+
+// "1/2" o.ä. → 0.5. parseFloat allein würde bei "1/2" nur "1" lesen und den
+// Bruch stillschweigend verschlucken.
+function parseAmount(raw: string): number {
+  const fraction = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fraction) return parseInt(fraction[1], 10) / parseInt(fraction[2], 10);
+  const mixed = raw.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) return parseInt(mixed[1], 10) + parseInt(mixed[2], 10) / parseInt(mixed[3], 10);
+  return parseFloat(raw.replace(',', '.'));
+}
+
 export function parseIngredient(raw: string): { name: string; amount: number; unit: string } {
-  const m = raw.match(/^([\d.,/]+)\s*([a-zA-ZäöüÄÖÜß]+)?\s+(.+)$/);
+  const normalized = normalizeVulgarFractions(raw);
+  const m = normalized.match(/^([\d.,/ ]+)\s*([a-zA-ZäöüÄÖÜß]+)?\s+(.+)$/);
   if (!m) return { name: raw.trim(), amount: 0, unit: '' };
-  const amount = parseFloat(m[1].replace(',', '.'));
+  const amount = parseAmount(m[1].trim());
   return { name: m[3].trim(), amount: isNaN(amount) ? 0 : amount, unit: m[2] ?? '' };
 }

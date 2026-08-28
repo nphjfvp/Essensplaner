@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { NutritionGoals, Recipe } from '../lib/types';
@@ -26,6 +26,7 @@ export default function MealPlanPage() {
   const [templates, setTemplates] = useState<MealPlanTemplate[]>([]);
   const [templateName, setTemplateName] = useState('');
   const [status, setStatus] = useState('');
+  const [planError, setPlanError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -80,10 +81,15 @@ export default function MealPlanPage() {
 
   const assign = async (day: number, recipeId: string) => {
     if (!user) return;
-    if (!recipeId) {
-      if (plan[day]) await deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`));
-    } else {
-      await setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId });
+    setPlanError('');
+    try {
+      if (!recipeId) {
+        if (plan[day]) await deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`));
+      } else {
+        await setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId });
+      }
+    } catch (err: any) {
+      setPlanError(err?.message ?? 'Speichern fehlgeschlagen');
     }
   };
 
@@ -123,6 +129,7 @@ export default function MealPlanPage() {
 
   const addWeekToShopping = async () => {
     if (!user || !plannedRecipes.length) return;
+    setStatus('');
     const agg = new Map<string, { name: string; amount: number; unit: string }>();
     for (const r of plannedRecipes) {
       for (const ing of r.ingredients) {
@@ -141,6 +148,7 @@ export default function MealPlanPage() {
     let added = 0;
     let merged = 0;
     let inPantry = 0;
+    const batch = writeBatch(db);
     for (const v of agg.values()) {
       if (pantryNames.has(v.name.trim().toLowerCase())) {
         inPantry++;
@@ -148,10 +156,10 @@ export default function MealPlanPage() {
       }
       const existing = existingByKey.get(shoppingKey(v.name, v.unit));
       if (existing) {
-        await updateDoc(doc(db, 'shopping', existing.id), { amount: (existing.amount ?? 0) + v.amount });
+        batch.update(doc(db, 'shopping', existing.id), { amount: (existing.amount ?? 0) + v.amount });
         merged++;
       } else {
-        await addDoc(collection(db, 'shopping'), {
+        batch.set(doc(collection(db, 'shopping')), {
           ownerId: user.uid,
           name: v.name,
           category: categorize(v.name),
@@ -162,42 +170,64 @@ export default function MealPlanPage() {
         added++;
       }
     }
-    setStatus(
-      `${added} Zutat(en) hinzugefügt` +
-        (merged ? `, ${merged} Menge(n) aktualisiert` : '') +
-        (inPantry ? `, ${inPantry} schon im Vorrat übersprungen` : '') +
-        '.'
-    );
+    try {
+      await batch.commit();
+      setStatus(
+        `${added} Zutat(en) hinzugefügt` +
+          (merged ? `, ${merged} Menge(n) aktualisiert` : '') +
+          (inPantry ? `, ${inPantry} schon im Vorrat übersprungen` : '') +
+          '.'
+      );
+    } catch (err: any) {
+      setStatus(err?.message ?? 'Einkaufsliste aktualisieren fehlgeschlagen');
+    }
   };
 
   const saveTemplate = async () => {
     if (!user || !templateName.trim() || !Object.keys(plan).length) return;
-    await addDoc(collection(db, 'mealplanTemplates'), {
-      ownerId: user.uid,
-      name: templateName.trim(),
-      days: plan,
-      createdAt: Date.now(),
-    });
-    setTemplateName('');
+    setPlanError('');
+    try {
+      await addDoc(collection(db, 'mealplanTemplates'), {
+        ownerId: user.uid,
+        name: templateName.trim(),
+        days: plan,
+        createdAt: Date.now(),
+      });
+      setTemplateName('');
+    } catch (err: any) {
+      setPlanError(err?.message ?? 'Vorlage speichern fehlgeschlagen');
+    }
   };
 
   const applyTemplate = async (t: MealPlanTemplate) => {
     if (!user) return;
     if (!window.confirm(`Vorlage "${t.name}" anwenden? Die aktuelle Wochenplanung wird ersetzt.`)) return;
+    setPlanError('');
     const validRecipeIds = new Set(recipes.map((r) => r.id).filter((id): id is string => Boolean(id)));
     const { toSet, toDelete } = computeTemplateApply(plan, t.days, validRecipeIds);
-    await Promise.all([
-      ...toSet.map(([day, recipeId]) =>
-        setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId })
-      ),
-      ...toDelete.map((day) => deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`))),
-    ]);
+    const batch = writeBatch(db);
+    for (const [day, recipeId] of toSet) {
+      batch.set(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId });
+    }
+    for (const day of toDelete) {
+      batch.delete(doc(db, 'mealplan', `${user.uid}_${day}`));
+    }
+    try {
+      await batch.commit();
+    } catch (err: any) {
+      setPlanError(err?.message ?? 'Vorlage anwenden fehlgeschlagen');
+    }
   };
 
   const removeTemplate = async (id?: string) => {
     if (!id) return;
     if (!window.confirm('Vorlage wirklich löschen?')) return;
-    await deleteDoc(doc(db, 'mealplanTemplates', id));
+    setPlanError('');
+    try {
+      await deleteDoc(doc(db, 'mealplanTemplates', id));
+    } catch (err: any) {
+      setPlanError(err?.message ?? 'Vorlage löschen fehlgeschlagen');
+    }
   };
 
   return (
@@ -235,6 +265,7 @@ export default function MealPlanPage() {
         <p className="meta">Schon im Vorrat (wird nicht hinzugefügt): {pantryHits.join(', ')}</p>
       )}
       {status && <p className="meta">{status}</p>}
+      {planError && <div className="error">{planError}</div>}
 
       {DAYS.map((label, day) => {
         const r = recipes.find((x) => x.id === plan[day]);

@@ -134,6 +134,12 @@ export default function RecipesPage() {
     try {
       await updateDoc(doc(db, 'recipes', selected.id), {
         ...adjustResult,
+        // Anpassung kann den Rezeptinhalt substantiell verändern (z.B. "vegan
+        // machen") — die alten, pro Portion geschätzten Nährwerte gelten dann
+        // nicht mehr und würden sonst fälschlich weiter angezeigt.
+        estimated_nutrition: deleteField(),
+        estimated_price: deleteField(),
+        kcal_bucket: deleteField(),
         updatedAt: Date.now(),
       });
       setAdjustResult(null);

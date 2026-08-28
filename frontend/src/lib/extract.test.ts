@@ -24,6 +24,19 @@ describe('parseIngredient', () => {
   it('handles a missing unit (amount directly followed by name)', () => {
     expect(parseIngredient('3 Eier')).toEqual({ name: 'Eier', amount: 3, unit: '' });
   });
+
+  it('parses simple fractions ("1/2") instead of truncating to the whole number', () => {
+    expect(parseIngredient('1/2 Zitrone')).toEqual({ name: 'Zitrone', amount: 0.5, unit: '' });
+  });
+
+  it('parses mixed fractions ("1 1/2 TL")', () => {
+    expect(parseIngredient('1 1/2 TL Zucker')).toEqual({ name: 'Zucker', amount: 1.5, unit: 'TL' });
+  });
+
+  it('parses Unicode vulgar fraction characters ("½", "¾")', () => {
+    expect(parseIngredient('½ Zitrone')).toEqual({ name: 'Zitrone', amount: 0.5, unit: '' });
+    expect(parseIngredient('¾ TL Salz')).toEqual({ name: 'Salz', amount: 0.75, unit: 'TL' });
+  });
 });
 
 describe('parseServings', () => {
@@ -117,5 +130,21 @@ describe('extractRecipe', () => {
 
   it('throws when neither url, text nor images are given', async () => {
     await expect(extractRecipe({ ...args, sourceType: 'manual' })).rejects.toThrow(/Keine Quelle/);
+  });
+
+  it('prefers text over blog scraping when both a blog URL and text are given (no fetch attempted)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    vi.mocked(chatCompletion).mockResolvedValue(
+      JSON.stringify({ title: 'Kuchen', servings: 4, ingredients: [], steps: [] })
+    );
+    const result = await extractRecipe({
+      ...args,
+      sourceType: 'blog',
+      url: 'https://example.com/rezept',
+      text: 'Kuchen: 300g Mehl, 2 Eier...',
+    });
+    expect(result.title).toBe('Kuchen');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
