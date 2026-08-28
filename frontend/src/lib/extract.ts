@@ -17,10 +17,14 @@ export interface ExtractInput {
   model: string;
   visionModel: string;
   apiKey: string;
+  // Opt-in: URL bei CORS-Fehlern über externe Proxies (allorigins.win,
+  // corsproxy.io) laden. Default false — sonst ginge die URL sonst ohne
+  // Zustimmung an Drittanbieter.
+  allowCorsProxy?: boolean;
 }
 
 export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecipe & { sourceUrl?: string }> {
-  const { sourceType, url, text, imageDataUrls, model, visionModel, apiKey } = input;
+  const { sourceType, url, text, imageDataUrls, model, visionModel, apiKey, allowCorsProxy } = input;
 
   // 1) Text (Caption / Transcript / manuell) — hat immer Vorrang vor jedem
   // automatischen Auslesen: wer bereits Text eingefügt hat (egal ob
@@ -44,7 +48,7 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
 
   // 2) Blog-URL: erst Schema.org JSON-LD, sonst Seitentext ans LLM
   if (url && sourceType === 'blog') {
-    const html = await fetchHtml(url);
+    const html = await fetchHtml(url, allowCorsProxy);
     if (html) {
       const structured = parseJsonLd(html);
       if (structured) return { ...structured, sourceUrl: url };
@@ -99,13 +103,16 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
   throw new Error('Keine Quelle angegeben (url/text/image)');
 }
 
-// Direkt versuchen; bei CORS-Fehler über freie Proxies.
-async function fetchHtml(url: string): Promise<string | null> {
-  const candidates = [
-    url,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  ];
+// Direkt versuchen; bei CORS-Fehler nur mit Zustimmung über freie Proxies
+// (URL ginge sonst ohne Opt-in an Drittanbieter).
+async function fetchHtml(url: string, allowCorsProxy?: boolean): Promise<string | null> {
+  const candidates = allowCorsProxy
+    ? [
+        url,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+      ]
+    : [url];
   for (const src of candidates) {
     try {
       const res = await fetch(src);

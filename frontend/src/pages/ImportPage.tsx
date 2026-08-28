@@ -9,6 +9,7 @@ import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
 import { parseSharedPayload } from '../lib/share';
 import { resizeImageToDataUrl } from '../lib/image';
+import { loadAllowCorsProxy } from '../lib/privacy';
 import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 import { useFolders } from '../lib/useFolders';
@@ -83,6 +84,7 @@ export default function ImportPage() {
       if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
 
       const settings = await loadSettings(user.uid);
+      const allowCorsProxy = await loadAllowCorsProxy(user.uid);
       const trimmedUrl = url.trim();
       const sourceType = trimmedUrl ? detectSourceType(trimmedUrl) : 'manual';
       // Text (falls vorhanden) wird unabhängig vom aktiven Tab mitgeschickt:
@@ -93,6 +95,7 @@ export default function ImportPage() {
         url: trimmedUrl || undefined,
         text: mode === 'image' ? undefined : text.trim() || undefined,
         imageDataUrls: mode === 'image' ? imageDataUrls : undefined,
+        allowCorsProxy,
         model: settings.extract,
         visionModel: settings.vision,
         apiKey,

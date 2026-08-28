@@ -147,4 +147,23 @@ describe('extractRecipe', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  it('does not fall back to CORS proxies without opt-in', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('CORS'));
+    await expect(
+      extractRecipe({ ...args, sourceType: 'blog', url: 'https://example.com/rezept' })
+    ).rejects.toThrow(/nicht lesbar/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('https://example.com/rezept');
+    fetchSpy.mockRestore();
+  });
+
+  it('falls back to CORS proxies when allowCorsProxy is true', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('CORS'));
+    await expect(
+      extractRecipe({ ...args, sourceType: 'blog', url: 'https://example.com/rezept', allowCorsProxy: true })
+    ).rejects.toThrow(/nicht lesbar/);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    fetchSpy.mockRestore();
+  });
 });

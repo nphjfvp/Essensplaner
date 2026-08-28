@@ -35,3 +35,11 @@ export async function classifyRecipe(
   );
   return parseJson<{ folders: string[]; kcal_bucket: KcalBucket }>(raw);
 }
+
+// Deterministisch aus kcal ableiten (siehe CLASSIFY_PROMPT) statt für ein
+// bloßes Neuberechnen des Buckets einen zweiten KI-Call zu brauchen.
+export function kcalBucketFor(kcal: number): KcalBucket {
+  if (kcal < 500) return '<500';
+  if (kcal <= 1000) return '500-1000';
+  return '>1000';
+}

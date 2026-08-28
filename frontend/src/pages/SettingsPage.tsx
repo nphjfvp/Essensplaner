@@ -26,6 +26,7 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const [settings, setSettings] = useState<ModelSettings>({ ...DEFAULT_MODELS });
   const [goals, setGoals] = useState<NutritionGoals>({ ...EMPTY_GOALS });
+  const [allowCorsProxy, setAllowCorsProxy] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -36,6 +37,7 @@ export default function SettingsPage() {
       const d = snap.data();
       if (d?.settings) setSettings(sanitizeSettings(d.settings));
       if (d?.goals) setGoals({ ...EMPTY_GOALS, ...d.goals });
+      setAllowCorsProxy(Boolean(d?.allowCorsProxy));
       const k = getApiKey();
       if (k) setApiKey(k);
     });
@@ -46,7 +48,7 @@ export default function SettingsPage() {
     setSaveError('');
     saveApiKey(apiKey);
     try {
-      await setDoc(doc(db, 'users', user.uid), { settings, goals }, { merge: true });
+      await setDoc(doc(db, 'users', user.uid), { settings, goals, allowCorsProxy }, { merge: true });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
@@ -100,6 +102,23 @@ export default function SettingsPage() {
           />
         </div>
       ))}
+
+      <h3>Datenschutz</h3>
+      <div className="field">
+        <label>
+          <input
+            type="checkbox"
+            checked={allowCorsProxy}
+            onChange={(e) => setAllowCorsProxy(e.target.checked)}
+          />{' '}
+          Externe CORS-Proxies für Blog-Import erlauben
+        </label>
+        <p className="meta">
+          Manche Rezept-Blogs blockieren das direkte Auslesen aus dem Browser. Wenn aktiviert, wird die URL in diesem
+          Fall an einen externen Proxy (allorigins.win oder corsproxy.io) geschickt. Standardmäßig aus — ohne
+          Zustimmung geht keine URL an Dritte, das Rezept muss dann per Text eingefügt werden.
+        </p>
+      </div>
 
       {saveError && <div className="error">{saveError}</div>}
       <button className="primary" onClick={save}>
