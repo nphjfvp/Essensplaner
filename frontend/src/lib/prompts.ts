@@ -78,3 +78,17 @@ Prüfe: fehlende/unklare Zutaten, unlogische Mengen, fehlende Zubereitungsschrit
 
 Antworte als kurzer, strukturierter Text mit Stichpunkten. Kein JSON.
 `;
+
+export const PANTRY_PHOTO_PROMPT = `Du erkennst Lebensmittel-Vorräte aus Fotos, um eine Vorratsliste zu befüllen.
+
+Ist das Bild ein Kassenzettel/Kassenbon: Liste alle gekauften Lebensmittel-Artikel (keine Non-Food-Artikel, keine Pfand-/Rabatt-/Summenzeilen, keine Preise).
+Zeigt das Bild Lebensmittel/Verpackungen direkt: Liste die erkannten Lebensmittel.
+
+Antworte NUR mit JSON:
+{ "items": [string] }
+
+Regeln:
+- Kurze, alltagssprachliche Produktnamen (z.B. "Milch" statt "REWE Bio Vollmilch 3,5% 1L")
+- Keine Mengenangaben, keine Duplikate
+- Nichts erkennbar => leere Liste
+`;

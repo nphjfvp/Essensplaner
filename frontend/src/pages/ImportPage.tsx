@@ -8,6 +8,7 @@ import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
 import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
 import { parseSharedPayload } from '../lib/share';
+import { resizeImageToDataUrl } from '../lib/image';
 import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 import { useFolders } from '../lib/useFolders';
@@ -19,27 +20,6 @@ function detectSourceType(u: string): SourceType {
   if (u.includes('tiktok')) return 'tiktok';
   if (u.includes('youtube') || u.includes('youtu.be')) return 'youtube';
   return 'blog';
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const scale = Math.min(1, 1024 / img.width);
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
-      };
-      img.onerror = () => reject(new Error('Bild nicht lesbar'));
-      img.src = reader.result as string;
-    };
-    reader.onerror = () => reject(new Error('Bild nicht lesbar'));
-    reader.readAsDataURL(file);
-  });
 }
 
 export default function ImportPage() {
@@ -85,7 +65,7 @@ export default function ImportPage() {
   const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    const urls = await Promise.all(files.map(fileToDataUrl));
+    const urls = await Promise.all(files.map((f) => resizeImageToDataUrl(f)));
     setImageDataUrls((prev) => [...prev, ...urls]);
     e.target.value = '';
   };
