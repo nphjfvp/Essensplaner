@@ -122,7 +122,7 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-function parseJsonLd(html: string): ExtractedRecipe | null {
+export function parseJsonLd(html: string): ExtractedRecipe | null {
   const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let m: RegExpExecArray | null;
   while ((m = scriptRegex.exec(html)) !== null) {
@@ -141,7 +141,7 @@ function parseJsonLd(html: string): ExtractedRecipe | null {
   return null;
 }
 
-function mapJsonLdToRecipe(node: any): ExtractedRecipe {
+export function mapJsonLdToRecipe(node: any): ExtractedRecipe {
   const ingredients = (node.recipeIngredient ?? []).map((ing: string) => parseIngredient(ing));
   const steps = (node.recipeInstructions ?? [])
     .map((s: any) => (typeof s === 'string' ? s : s.text ?? ''))
@@ -154,7 +154,7 @@ function mapJsonLdToRecipe(node: any): ExtractedRecipe {
   };
 }
 
-function parseServings(value: any): number {
+export function parseServings(value: any): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
     const n = parseInt(value, 10);
@@ -163,7 +163,7 @@ function parseServings(value: any): number {
   return 4;
 }
 
-function parseIngredient(raw: string): { name: string; amount: number; unit: string } {
+export function parseIngredient(raw: string): { name: string; amount: number; unit: string } {
   const m = raw.match(/^([\d.,/]+)\s*([a-zA-ZäöüÄÖÜß]+)?\s+(.+)$/);
   if (!m) return { name: raw.trim(), amount: 0, unit: '' };
   const amount = parseFloat(m[1].replace(',', '.'));
