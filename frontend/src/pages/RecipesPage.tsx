@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, deleteField, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Ingredient, Recipe } from '../lib/types';
@@ -8,6 +8,8 @@ import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
 import { adjustRecipe, type AdjustedRecipe } from '../lib/adjust';
 import { reviewRecipe } from '../lib/review';
+import { scaleIngredients, type ScaledRecipe } from '../lib/scale';
+import { deleteRecipePhoto, uploadRecipePhoto } from '../lib/photo';
 
 export default function RecipesPage() {
   const { user } = useAuth();
@@ -34,6 +36,14 @@ export default function RecipesPage() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState('');
 
+  const [scaleOpen, setScaleOpen] = useState(false);
+  const [scaleServings, setScaleServings] = useState('');
+  const [scaleResult, setScaleResult] = useState<ScaledRecipe | null>(null);
+  const [scaleError, setScaleError] = useState('');
+
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'recipes'), where('ownerId', '==', user.uid));
@@ -55,6 +65,11 @@ export default function RecipesPage() {
     setReviewOpen(false);
     setReviewResult('');
     setReviewError('');
+    setScaleOpen(false);
+    setScaleServings('');
+    setScaleResult(null);
+    setScaleError('');
+    setPhotoError('');
   };
 
   const startEdit = () => {
@@ -166,6 +181,82 @@ export default function RecipesPage() {
     }
   };
 
+  const runScale = () => {
+    if (!selected) return;
+    setScaleError('');
+    const target = Number(scaleServings);
+    if (!target || target <= 0) {
+      setScaleError('Bitte eine gültige Portionenzahl eingeben');
+      return;
+    }
+    setScaleResult(scaleIngredients(selected.ingredients, selected.servings, target));
+  };
+
+  const applyScale = async () => {
+    if (!selected?.id || !scaleResult) return;
+    setError('');
+    try {
+      await updateDoc(doc(db, 'recipes', selected.id), {
+        servings: scaleResult.servings,
+        ingredients: scaleResult.ingredients,
+        updatedAt: Date.now(),
+      });
+      setScaleResult(null);
+      setScaleOpen(false);
+      setScaleServings('');
+    } catch (err: any) {
+      setError(err?.message ?? 'Übernehmen fehlgeschlagen');
+    }
+  };
+
+  const saveScaleAsNew = async () => {
+    if (!selected || !scaleResult || !user) return;
+    setError('');
+    try {
+      const { id: _id, ...rest } = selected;
+      await addDoc(collection(db, 'recipes'), {
+        ...rest,
+        servings: scaleResult.servings,
+        ingredients: scaleResult.ingredients,
+        ownerId: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      setScaleResult(null);
+      setScaleOpen(false);
+      setScaleServings('');
+    } catch (err: any) {
+      setError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
+  };
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selected?.id || !user) return;
+    setPhotoError('');
+    setPhotoUploading(true);
+    try {
+      const url = await uploadRecipePhoto(user.uid, selected.id, file);
+      await updateDoc(doc(db, 'recipes', selected.id), { image_url: url, updatedAt: Date.now() });
+    } catch (err: any) {
+      setPhotoError(err?.message ?? 'Foto-Upload fehlgeschlagen');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const removePhoto = async () => {
+    if (!selected?.id || !user) return;
+    setPhotoError('');
+    try {
+      await deleteRecipePhoto(user.uid, selected.id);
+      await updateDoc(doc(db, 'recipes', selected.id), { image_url: deleteField(), updatedAt: Date.now() });
+    } catch (err: any) {
+      setPhotoError(err?.message ?? 'Entfernen fehlgeschlagen');
+    }
+  };
+
   const toggleEditFolder = (f: string) => {
     setEditFolders((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   };
@@ -209,6 +300,7 @@ export default function RecipesPage() {
       <div className="cards">
         {visible.map((r) => (
           <div className="card" key={r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
+            {r.image_url && <img src={r.image_url} alt={r.title} className="card-photo" />}
             <h3>{r.title}</h3>
             <div className="meta">
               <span>{r.servings} Port.</span>
@@ -231,6 +323,20 @@ export default function RecipesPage() {
       {selected && !editing && (
         <div className="draft">
           <h3>{selected.title}</h3>
+
+          {selected.image_url && <img src={selected.image_url} alt={selected.title} className="recipe-photo" />}
+          <div className="field">
+            <label>{selected.image_url ? 'Foto ersetzen' : 'Foto vom Ergebnis hochladen (optional, nach dem Kochen)'}</label>
+            <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} disabled={photoUploading} />
+            {photoUploading && <p className="meta">Lädt hoch…</p>}
+            {selected.image_url && (
+              <button onClick={removePhoto} disabled={photoUploading}>
+                Foto entfernen
+              </button>
+            )}
+            {photoError && <div className="error">{photoError}</div>}
+          </div>
+
           <div className="meta">
             <span>{selected.servings} Port.</span>
             {selected.estimated_nutrition && (
@@ -277,6 +383,42 @@ export default function RecipesPage() {
           <button onClick={del}>Löschen</button>
           <button onClick={() => setReviewOpen((v) => !v)}>Review</button>
           <button onClick={() => setAdjustOpen((v) => !v)}>Anpassen</button>
+          <button onClick={() => setScaleOpen((v) => !v)}>Portionen skalieren</button>
+
+          {scaleOpen && (
+            <div className="field">
+              <input
+                type="number"
+                placeholder={`Neue Portionenzahl (aktuell ${selected.servings})`}
+                value={scaleServings}
+                onChange={(e) => setScaleServings(e.target.value)}
+              />
+              <button className="primary" onClick={runScale}>
+                Skalieren
+              </button>
+              {scaleError && <div className="error">{scaleError}</div>}
+            </div>
+          )}
+
+          {scaleResult && (
+            <div className="draft">
+              <h4>Skaliert auf {scaleResult.servings} Portionen</h4>
+              <ul>
+                {scaleResult.ingredients.map((ing, i) => (
+                  <li key={i}>
+                    {ing.amount > 0 && `${ing.amount} ${ing.unit} `}
+                    {ing.name}
+                  </li>
+                ))}
+              </ul>
+              <button className="primary" onClick={applyScale}>
+                Übernehmen
+              </button>
+              <button className="primary" onClick={saveScaleAsNew}>
+                Als neues Rezept speichern
+              </button>
+            </div>
+          )}
 
           {reviewOpen && (
             <div className="field">

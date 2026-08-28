@@ -50,3 +50,11 @@ export interface ModelSettings {
   adjust: string;
   review: string;
 }
+
+// Tagesziele — 0/undefined bedeutet "kein Ziel gesetzt".
+export interface NutritionGoals {
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
@@ -6,6 +7,7 @@ import { extractRecipe } from '../lib/extract';
 import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
 import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
+import { parseSharedPayload } from '../lib/share';
 import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 import { useFolders } from '../lib/useFolders';
@@ -42,12 +44,36 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function ImportPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [mode, setMode] = useState<Mode>('url');
   const [url, setUrl] = useState('');
   const [text, setText] = useState('');
   const [imageDataUrls, setImageDataUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sharedHint, setSharedHint] = useState(false);
+
+  // Vom OS-Teilen-Menü übergebene Daten (z.B. Instagram/TikTok-Link geteilt
+  // an die installierte App) übernehmen und aus der URL entfernen.
+  useEffect(() => {
+    const shared = parseSharedPayload({
+      title: searchParams.get('title') ?? undefined,
+      text: searchParams.get('text') ?? undefined,
+      url: searchParams.get('url') ?? undefined,
+    });
+    if (!shared.url && !shared.text) return;
+    if (shared.url) {
+      setUrl(shared.url);
+      setMode('url');
+    }
+    if (shared.text) {
+      setText(shared.text);
+      if (!shared.url) setMode('text');
+    }
+    setSharedHint(true);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [draft, setDraft] = useState<Recipe | null>(null);
   const [nutrition, setNutrition] = useState<Nutrition | null>(null);
@@ -77,11 +103,15 @@ export default function ImportPage() {
       if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
 
       const settings = await loadSettings(user.uid);
-      const sourceType = mode === 'url' ? detectSourceType(url) : 'manual';
+      const trimmedUrl = url.trim();
+      const sourceType = trimmedUrl ? detectSourceType(trimmedUrl) : 'manual';
+      // Text (falls vorhanden) wird unabhängig vom aktiven Tab mitgeschickt:
+      // z.B. Instagram/TikTok-Link im URL-Feld + eingefügte Caption im
+      // Text-Feld sollen zusammen funktionieren, nicht nur im "Text"-Tab.
       const extracted = await extractRecipe({
         sourceType,
-        url: mode === 'url' ? url : undefined,
-        text: mode === 'text' ? text : undefined,
+        url: trimmedUrl || undefined,
+        text: mode === 'image' ? undefined : text.trim() || undefined,
         imageDataUrls: mode === 'image' ? imageDataUrls : undefined,
         model: settings.extract,
         visionModel: settings.vision,
@@ -149,6 +179,8 @@ export default function ImportPage() {
     <div className="page">
       <h2>Rezept importieren</h2>
 
+      {sharedHint && <p className="meta">Geteilter Link/Text übernommen — bitte prüfen und importieren.</p>}
+
       <div className="tabs">
         {(['url', 'text', 'image'] as Mode[]).map((m) => (
           <button key={m} className={mode === m ? 'active' : ''} onClick={() => setMode(m)}>
@@ -158,11 +190,27 @@ export default function ImportPage() {
       </div>
 
       {mode === 'url' && (
-        <input
-          placeholder="https://… (Blog, YouTube, Instagram, TikTok)"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
+        <>
+          <input
+            placeholder="https://… (Blog, YouTube, Instagram, TikTok)"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          {url.trim() && detectSourceType(url.trim()) !== 'blog' && (
+            <div className="field">
+              <p className="meta">
+                {detectSourceType(url.trim()) === 'instagram' ? 'Instagram' : detectSourceType(url.trim()) === 'tiktok' ? 'TikTok' : 'YouTube'}-Links
+                können nicht automatisch gelesen werden. Bitte Titel/Zutaten/Anleitung (z.B. aus der Beitrags-Beschreibung) hier einfügen:
+              </p>
+              <textarea
+                placeholder="Caption / Beschreibung / Zutatenliste hier einfügen"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={6}
+              />
+            </div>
+          )}
+        </>
       )}
       {mode === 'text' && (
         <textarea

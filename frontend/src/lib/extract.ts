@@ -45,12 +45,31 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
     throw new Error('URL nicht lesbar — bitte den Rezepttext als Text einfügen');
   }
 
-  // Instagram/TikTok/YouTube: kein zuverlässiges Scraping
+  // 2) Text (Caption / Transcript / manuell) — hat Vorrang vor dem
+  // "Instagram/TikTok/YouTube nicht lesbar"-Fall unten: Wer trotz einer
+  // solchen URL bereits Text eingefügt hat, soll nicht daran scheitern,
+  // dass hier vorher schon abgebrochen wird.
+  if (text) {
+    const raw = await chatCompletion(
+      {
+        model,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          { role: 'user', content: text },
+        ],
+        jsonMode: true,
+      },
+      apiKey
+    );
+    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
+  }
+
+  // Instagram/TikTok/YouTube ohne Text: kein zuverlässiges Scraping möglich
   if (url) {
     throw new Error('Diese Quelle kann nicht automatisch gelesen werden — bitte den Rezepttext einfügen');
   }
 
-  // 2) Bild-Input: Vision-Modell (mehrere Bilder = zusammengehörige Screenshots)
+  // 3) Bild-Input: Vision-Modell (mehrere Bilder = zusammengehörige Screenshots)
   if (imageDataUrls && imageDataUrls.length > 0) {
     const raw = await chatCompletion(
       {
@@ -68,22 +87,6 @@ export async function extractRecipe(input: ExtractInput): Promise<ExtractedRecip
               ...imageDataUrls.map((u) => ({ type: 'image_url', image_url: { url: u } } as const)),
             ],
           },
-        ],
-        jsonMode: true,
-      },
-      apiKey
-    );
-    return { ...parseJson<ExtractedRecipe>(raw), sourceUrl: url };
-  }
-
-  // 3) Text (Caption / Transcript / manuell)
-  if (text) {
-    const raw = await chatCompletion(
-      {
-        model,
-        messages: [
-          { role: 'system', content: EXTRACT_PROMPT },
-          { role: 'user', content: text },
         ],
         jsonMode: true,
       },
@@ -122,7 +125,7 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-function parseJsonLd(html: string): ExtractedRecipe | null {
+export function parseJsonLd(html: string): ExtractedRecipe | null {
   const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let m: RegExpExecArray | null;
   while ((m = scriptRegex.exec(html)) !== null) {
@@ -141,7 +144,7 @@ function parseJsonLd(html: string): ExtractedRecipe | null {
   return null;
 }
 
-function mapJsonLdToRecipe(node: any): ExtractedRecipe {
+export function mapJsonLdToRecipe(node: any): ExtractedRecipe {
   const ingredients = (node.recipeIngredient ?? []).map((ing: string) => parseIngredient(ing));
   const steps = (node.recipeInstructions ?? [])
     .map((s: any) => (typeof s === 'string' ? s : s.text ?? ''))
@@ -154,7 +157,7 @@ function mapJsonLdToRecipe(node: any): ExtractedRecipe {
   };
 }
 
-function parseServings(value: any): number {
+export function parseServings(value: any): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
     const n = parseInt(value, 10);
@@ -163,7 +166,7 @@ function parseServings(value: any): number {
   return 4;
 }
 
-function parseIngredient(raw: string): { name: string; amount: number; unit: string } {
+export function parseIngredient(raw: string): { name: string; amount: number; unit: string } {
   const m = raw.match(/^([\d.,/]+)\s*([a-zA-ZäöüÄÖÜß]+)?\s+(.+)$/);
   if (!m) return { name: raw.trim(), amount: 0, unit: '' };
   const amount = parseFloat(m[1].replace(',', '.'));

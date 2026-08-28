@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
+import { categorize, SHOPPING_CATEGORIES, type ShoppingCategory } from '../lib/shoppingCategories';
 
 interface PantryItem {
   id?: string;
@@ -16,6 +17,7 @@ interface ShopItem {
   amount?: number;
   unit?: string;
   done: boolean;
+  category?: ShoppingCategory;
 }
 
 export default function PantryPage() {
@@ -51,7 +53,8 @@ export default function PantryPage() {
 
   const addShop = async () => {
     if (!user || !shopName.trim()) return;
-    await addDoc(collection(db, 'shopping'), { ownerId: user.uid, name: shopName.trim(), done: false });
+    const name = shopName.trim();
+    await addDoc(collection(db, 'shopping'), { ownerId: user.uid, name, done: false, category: categorize(name) });
     setShopName('');
   };
 
@@ -67,6 +70,19 @@ export default function PantryPage() {
   const removeShop = async (id?: string) => {
     if (id) await deleteDoc(doc(db, 'shopping', id));
   };
+
+  const groupedShopping = useMemo(() => {
+    const groups = new Map<ShoppingCategory, ShopItem[]>();
+    for (const it of shopping) {
+      const cat = it.category ?? categorize(it.name);
+      const list = groups.get(cat) ?? [];
+      list.push(it);
+      groups.set(cat, list);
+    }
+    return SHOPPING_CATEGORIES.map((cat) => [cat, groups.get(cat) ?? []] as const).filter(
+      ([, items]) => items.length > 0
+    );
+  }, [shopping]);
 
   return (
     <div className="page">
@@ -105,20 +121,25 @@ export default function PantryPage() {
           Hinzufügen
         </button>
       </div>
-      <ul>
-        {shopping.map((it) => (
-          <li key={it.id}>
-            <label>
-              <input type="checkbox" checked={it.done} onChange={() => toggleShop(it)} />
-              <span style={{ textDecoration: it.done ? 'line-through' : 'none' }}>
-                {it.amount ? `${it.amount} ${it.unit} ` : ''}
-                {it.name}
-              </span>
-            </label>
-            <button onClick={() => removeShop(it.id)}>×</button>
-          </li>
-        ))}
-      </ul>
+      {groupedShopping.map(([category, items]) => (
+        <div key={category} className="shop-group">
+          <h4>{category}</h4>
+          <ul>
+            {items.map((it) => (
+              <li key={it.id}>
+                <label>
+                  <input type="checkbox" checked={it.done} onChange={() => toggleShop(it)} />
+                  <span style={{ textDecoration: it.done ? 'line-through' : 'none' }}>
+                    {it.amount ? `${it.amount} ${it.unit} ` : ''}
+                    {it.name}
+                  </span>
+                </label>
+                <button onClick={() => removeShop(it.id)}>×</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
