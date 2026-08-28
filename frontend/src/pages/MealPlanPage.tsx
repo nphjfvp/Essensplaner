@@ -2,8 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
-import type { Recipe } from '../lib/types';
+import type { NutritionGoals, Recipe } from '../lib/types';
 import { categorize } from '../lib/shoppingCategories';
+import { EMPTY_GOALS, hasGoals, loadGoals } from '../lib/goals';
+
+const GOAL_LABELS: { key: keyof NutritionGoals; label: string; unit: string }[] = [
+  { key: 'kcal', label: 'Kalorien', unit: 'kcal' },
+  { key: 'protein_g', label: 'Protein', unit: 'g' },
+  { key: 'carbs_g', label: 'Kohlenhydrate', unit: 'g' },
+  { key: 'fat_g', label: 'Fett', unit: 'g' },
+];
 
 const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
@@ -13,7 +21,13 @@ export default function MealPlanPage() {
   const [plan, setPlan] = useState<Record<number, string>>({});
   const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
   const [pantry, setPantry] = useState<{ name: string }[]>([]);
+  const [goals, setGoals] = useState<NutritionGoals>({ ...EMPTY_GOALS });
   const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (!user) return;
+    loadGoals(user.uid).then(setGoals);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -72,7 +86,16 @@ export default function MealPlanPage() {
     [plan, recipes]
   );
 
-  const totalKcal = plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0);
+  const weeklyTotals: NutritionGoals = useMemo(
+    () => ({
+      kcal: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0),
+      protein_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.protein_g ?? 0), 0),
+      carbs_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.carbs_g ?? 0), 0),
+      fat_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.fat_g ?? 0), 0),
+    }),
+    [plannedRecipes]
+  );
+  const totalKcal = weeklyTotals.kcal;
 
   const pantryHits = useMemo(() => {
     const pantryNames = new Set(pantry.map((p) => p.name.trim().toLowerCase()));
@@ -143,6 +166,28 @@ export default function MealPlanPage() {
       <h2>Wochenplan</h2>
 
       {totalKcal > 0 && <p>🔥 Wochensumme: {totalKcal} kcal</p>}
+
+      {hasGoals(goals) && (
+        <div className="goals">
+          <h3>Wochenziel</h3>
+          {GOAL_LABELS.map(({ key, label, unit }) => {
+            const target = goals[key] * 7;
+            if (!target) return null;
+            const actual = Math.round(weeklyTotals[key]);
+            const pct = Math.min(100, Math.round((actual / target) * 100));
+            return (
+              <div className="goal-row" key={key}>
+                <span className="meta">
+                  {label}: {actual} / {target} {unit} ({pct}%)
+                </span>
+                <div className="goal-bar">
+                  <div className="goal-bar-fill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <button className="primary" onClick={addWeekToShopping} disabled={!plannedRecipes.length}>
         Zutaten der Woche auf Einkaufsliste
