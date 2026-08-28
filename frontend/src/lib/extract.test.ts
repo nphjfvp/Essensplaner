@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { mapJsonLdToRecipe, parseIngredient, parseJsonLd, parseServings } from './extract';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./openrouter', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./openrouter')>();
+  return { ...actual, chatCompletion: vi.fn() };
+});
+
+import { chatCompletion } from './openrouter';
+import { extractRecipe, mapJsonLdToRecipe, parseIngredient, parseJsonLd, parseServings } from './extract';
 
 describe('parseIngredient', () => {
   it('parses "amount unit name"', () => {
@@ -82,5 +89,33 @@ describe('parseJsonLd', () => {
   it('skips broken JSON-LD instead of throwing', () => {
     const html = `<script type="application/ld+json">{ not valid json </script>`;
     expect(parseJsonLd(html)).toBeNull();
+  });
+});
+
+describe('extractRecipe', () => {
+  const args = { model: 'test-model', visionModel: 'test-vision-model', apiKey: 'key' };
+
+  it('uses provided text instead of throwing when a non-blog URL (Instagram/TikTok/YouTube) is also present', async () => {
+    vi.mocked(chatCompletion).mockResolvedValue(
+      JSON.stringify({ title: 'Pasta', servings: 2, ingredients: [], steps: [] })
+    );
+    const result = await extractRecipe({
+      ...args,
+      sourceType: 'instagram',
+      url: 'https://www.instagram.com/reel/abc123/',
+      text: 'Pasta Rezept: 200g Nudeln, 1 Dose Tomaten...',
+    });
+    expect(result.title).toBe('Pasta');
+    expect(result.sourceUrl).toBe('https://www.instagram.com/reel/abc123/');
+  });
+
+  it('still throws the guidance error for a non-blog URL without any text', async () => {
+    await expect(
+      extractRecipe({ ...args, sourceType: 'tiktok', url: 'https://www.tiktok.com/@x/video/1' })
+    ).rejects.toThrow(/nicht automatisch gelesen werden/);
+  });
+
+  it('throws when neither url, text nor images are given', async () => {
+    await expect(extractRecipe({ ...args, sourceType: 'manual' })).rejects.toThrow(/Keine Quelle/);
   });
 });

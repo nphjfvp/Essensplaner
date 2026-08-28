@@ -103,11 +103,15 @@ export default function ImportPage() {
       if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
 
       const settings = await loadSettings(user.uid);
-      const sourceType = mode === 'url' ? detectSourceType(url) : 'manual';
+      const trimmedUrl = url.trim();
+      const sourceType = trimmedUrl ? detectSourceType(trimmedUrl) : 'manual';
+      // Text (falls vorhanden) wird unabhängig vom aktiven Tab mitgeschickt:
+      // z.B. Instagram/TikTok-Link im URL-Feld + eingefügte Caption im
+      // Text-Feld sollen zusammen funktionieren, nicht nur im "Text"-Tab.
       const extracted = await extractRecipe({
         sourceType,
-        url: mode === 'url' ? url : undefined,
-        text: mode === 'text' ? text : undefined,
+        url: trimmedUrl || undefined,
+        text: mode === 'image' ? undefined : text.trim() || undefined,
         imageDataUrls: mode === 'image' ? imageDataUrls : undefined,
         model: settings.extract,
         visionModel: settings.vision,
@@ -186,11 +190,27 @@ export default function ImportPage() {
       </div>
 
       {mode === 'url' && (
-        <input
-          placeholder="https://… (Blog, YouTube, Instagram, TikTok)"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
+        <>
+          <input
+            placeholder="https://… (Blog, YouTube, Instagram, TikTok)"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          {url.trim() && detectSourceType(url.trim()) !== 'blog' && (
+            <div className="field">
+              <p className="meta">
+                {detectSourceType(url.trim()) === 'instagram' ? 'Instagram' : detectSourceType(url.trim()) === 'tiktok' ? 'TikTok' : 'YouTube'}-Links
+                können nicht automatisch gelesen werden. Bitte Titel/Zutaten/Anleitung (z.B. aus der Beitrags-Beschreibung) hier einfügen:
+              </p>
+              <textarea
+                placeholder="Caption / Beschreibung / Zutatenliste hier einfügen"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={6}
+              />
+            </div>
+          )}
+        </>
       )}
       {mode === 'text' && (
         <textarea
