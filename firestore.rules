@@ -40,6 +40,13 @@ service cloud.firestore {
       allow delete: if isCurrentOwner();
     }
 
+    match /mealplanTemplates/{templateId} {
+      allow read: if isCurrentOwner();
+      allow create: if isOwner();
+      allow update: if isOwnerUpdate();
+      allow delete: if isCurrentOwner();
+    }
+
     match /pantry/{itemId} {
       allow read: if isCurrentOwner();
       allow create: if isOwner();

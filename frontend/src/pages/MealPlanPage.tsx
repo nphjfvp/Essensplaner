@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { NutritionGoals, Recipe } from '../lib/types';
 import { categorize } from '../lib/shoppingCategories';
 import { EMPTY_GOALS, hasGoals, loadGoals } from '../lib/goals';
+import { computeTemplateApply, type MealPlanTemplate } from '../lib/mealplanTemplates';
 
 const GOAL_LABELS: { key: keyof NutritionGoals; label: string; unit: string }[] = [
   { key: 'kcal', label: 'Kalorien', unit: 'kcal' },
@@ -22,6 +23,8 @@ export default function MealPlanPage() {
   const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
   const [pantry, setPantry] = useState<{ name: string }[]>([]);
   const [goals, setGoals] = useState<NutritionGoals>({ ...EMPTY_GOALS });
+  const [templates, setTemplates] = useState<MealPlanTemplate[]>([]);
+  const [templateName, setTemplateName] = useState('');
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -61,11 +64,17 @@ export default function MealPlanPage() {
       setPantry(snap.docs.map((d) => ({ name: d.data().name as string })))
     );
 
+    const q5 = query(collection(db, 'mealplanTemplates'), where('ownerId', '==', user.uid));
+    const unsub5 = onSnapshot(q5, (snap) =>
+      setTemplates(snap.docs.map((d) => ({ id: d.id, ...d.data() } as MealPlanTemplate)))
+    );
+
     return () => {
       unsub1();
       unsub2();
       unsub3();
       unsub4();
+      unsub5();
     };
   }, [user]);
 
@@ -161,6 +170,36 @@ export default function MealPlanPage() {
     );
   };
 
+  const saveTemplate = async () => {
+    if (!user || !templateName.trim() || !Object.keys(plan).length) return;
+    await addDoc(collection(db, 'mealplanTemplates'), {
+      ownerId: user.uid,
+      name: templateName.trim(),
+      days: plan,
+      createdAt: Date.now(),
+    });
+    setTemplateName('');
+  };
+
+  const applyTemplate = async (t: MealPlanTemplate) => {
+    if (!user) return;
+    if (!window.confirm(`Vorlage "${t.name}" anwenden? Die aktuelle Wochenplanung wird ersetzt.`)) return;
+    const validRecipeIds = new Set(recipes.map((r) => r.id).filter((id): id is string => Boolean(id)));
+    const { toSet, toDelete } = computeTemplateApply(plan, t.days, validRecipeIds);
+    await Promise.all([
+      ...toSet.map(([day, recipeId]) =>
+        setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId })
+      ),
+      ...toDelete.map((day) => deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`))),
+    ]);
+  };
+
+  const removeTemplate = async (id?: string) => {
+    if (!id) return;
+    if (!window.confirm('Vorlage wirklich löschen?')) return;
+    await deleteDoc(doc(db, 'mealplanTemplates', id));
+  };
+
   return (
     <div className="page">
       <h2>Wochenplan</h2>
@@ -216,6 +255,30 @@ export default function MealPlanPage() {
           </div>
         );
       })}
+
+      <h3>Vorlagen</h3>
+      <div className="new-folder">
+        <input
+          placeholder="Vorlagenname…"
+          value={templateName}
+          onChange={(e) => setTemplateName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && saveTemplate()}
+        />
+        <button onClick={saveTemplate} disabled={!templateName.trim() || !Object.keys(plan).length}>
+          Aktuelle Woche speichern
+        </button>
+      </div>
+      {templates.length === 0 && <p className="meta">Noch keine Vorlagen gespeichert.</p>}
+      <ul>
+        {templates.map((t) => (
+          <li key={t.id}>
+            {t.name}{' '}
+            <span className="meta">({Object.keys(t.days).length} Tag(e) belegt)</span>
+            <button onClick={() => applyTemplate(t)}>Anwenden</button>
+            <button onClick={() => removeTemplate(t.id)}>×</button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
