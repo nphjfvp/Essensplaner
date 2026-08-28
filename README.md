@@ -65,3 +65,13 @@ Pro Funktion separat in den App-Settings einstellbar (Extraktion, Vision, Nährw
 Essensplaner ist als installierbare PWA konfiguriert (Manifest + Icons in `frontend/public/icons`, generiert via `frontend/scripts/generate-icons.mjs`). Einmal installiert ("Zum Startbildschirm hinzufügen"), erscheint sie im OS-Teilen-Menü: ein aus Instagram/TikTok/YouTube geteilter Link landet direkt vorausgefüllt im Import (`frontend/src/lib/share.ts` extrahiert Link + Caption aus dem geteilten Text).
 
 **Einschränkung:** Die Web-Share-Target-API wird nur von Android/Chrome unterstützt — iOS/Safari kennt sie nicht. Auf iOS bleibt nur "Link kopieren" → manuell in den Import einfügen.
+
+## Firestore-Rules testen
+
+`firestore.rules` hat einen eigenen Testpfad mit dem Firebase-Emulator (braucht Java, wird beim ersten Lauf automatisch heruntergeladen):
+
+```bash
+cd frontend && npm run test:rules
+```
+
+Separat von `npm run test`, damit der normale Testlauf (und damit jeder Deploy) nicht den Emulator-Start braucht. Läuft in CI nur bei Änderungen an `firestore.rules` oder `frontend/firestore-rules/**` (`.github/workflows/firestore-rules.yml`).

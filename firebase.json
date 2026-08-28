@@ -12,5 +12,14 @@
     "rewrites": [
       { "source": "**", "destination": "/index.html" }
     ]
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }
