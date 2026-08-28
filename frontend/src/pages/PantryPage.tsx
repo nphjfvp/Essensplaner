@@ -9,6 +9,7 @@ import { resizeImageToDataUrl } from '../lib/image';
 import { extractPantryItems } from '../lib/pantryPhoto';
 import { HIGH_MATCH_THRESHOLD, matchRecipesToPantry } from '../lib/pantryMatch';
 import type { Recipe } from '../lib/types';
+import { useToast } from '../lib/ToastContext';
 
 interface PantryItem {
   id?: string;
@@ -33,6 +34,7 @@ interface DetectedItem {
 
 export default function PantryPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [pantry, setPantry] = useState<PantryItem[]>([]);
   const [shopping, setShopping] = useState<ShopItem[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -69,28 +71,50 @@ export default function PantryPage() {
 
   const addPantry = async () => {
     if (!user || !pantryName.trim()) return;
-    await addDoc(collection(db, 'pantry'), { ownerId: user.uid, name: pantryName.trim() });
-    setPantryName('');
+    try {
+      await addDoc(collection(db, 'pantry'), { ownerId: user.uid, name: pantryName.trim() });
+      setPantryName('');
+    } catch (err: any) {
+      showToast(err?.message ?? 'Hinzufügen fehlgeschlagen');
+    }
   };
 
   const addShop = async () => {
     if (!user || !shopName.trim()) return;
     const name = shopName.trim();
-    await addDoc(collection(db, 'shopping'), { ownerId: user.uid, name, done: false, category: categorize(name) });
-    setShopName('');
+    try {
+      await addDoc(collection(db, 'shopping'), { ownerId: user.uid, name, done: false, category: categorize(name) });
+      setShopName('');
+    } catch (err: any) {
+      showToast(err?.message ?? 'Hinzufügen fehlgeschlagen');
+    }
   };
 
   const toggleShop = async (item: ShopItem) => {
     if (!item.id) return;
-    await updateDoc(doc(db, 'shopping', item.id), { done: !item.done });
+    try {
+      await updateDoc(doc(db, 'shopping', item.id), { done: !item.done });
+    } catch (err: any) {
+      showToast(err?.message ?? 'Speichern fehlgeschlagen');
+    }
   };
 
   const removePantry = async (id?: string) => {
-    if (id) await deleteDoc(doc(db, 'pantry', id));
+    if (!id) return;
+    try {
+      await deleteDoc(doc(db, 'pantry', id));
+    } catch (err: any) {
+      showToast(err?.message ?? 'Löschen fehlgeschlagen');
+    }
   };
 
   const removeShop = async (id?: string) => {
-    if (id) await deleteDoc(doc(db, 'shopping', id));
+    if (!id) return;
+    try {
+      await deleteDoc(doc(db, 'shopping', id));
+    } catch (err: any) {
+      showToast(err?.message ?? 'Löschen fehlgeschlagen');
+    }
   };
 
   const groupedShopping = useMemo(() => {
