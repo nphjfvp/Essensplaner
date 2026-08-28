@@ -7,6 +7,7 @@ import { categorize } from '../lib/shoppingCategories';
 import { EMPTY_GOALS, hasGoals, loadGoals } from '../lib/goals';
 import { computeTemplateApply, type DayPlan, type MealPlanTemplate } from '../lib/mealplanTemplates';
 import { scaleIngredients } from '../lib/scale';
+import { useToast } from '../lib/ToastContext';
 
 const GOAL_LABELS: { key: keyof NutritionGoals; label: string; unit: string }[] = [
   { key: 'kcal', label: 'Kalorien', unit: 'kcal' },
@@ -19,6 +20,7 @@ const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samsta
 
 export default function MealPlanPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [plan, setPlan] = useState<Record<number, DayPlan>>({});
   const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
@@ -27,7 +29,6 @@ export default function MealPlanPage() {
   const [templates, setTemplates] = useState<MealPlanTemplate[]>([]);
   const [templateName, setTemplateName] = useState('');
   const [status, setStatus] = useState('');
-  const [planError, setPlanError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -83,7 +84,6 @@ export default function MealPlanPage() {
 
   const assign = async (day: number, recipeId: string) => {
     if (!user) return;
-    setPlanError('');
     try {
       if (!recipeId) {
         if (plan[day]) await deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`));
@@ -93,17 +93,16 @@ export default function MealPlanPage() {
         await setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId, portions });
       }
     } catch (err: any) {
-      setPlanError(err?.message ?? 'Speichern fehlgeschlagen');
+      showToast(err?.message ?? 'Speichern fehlgeschlagen');
     }
   };
 
   const setPortions = async (day: number, portions: number) => {
     if (!user || !plan[day] || portions < 1) return;
-    setPlanError('');
     try {
       await updateDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { portions });
     } catch (err: any) {
-      setPlanError(err?.message ?? 'Speichern fehlgeschlagen');
+      showToast(err?.message ?? 'Speichern fehlgeschlagen');
     }
   };
 
@@ -199,13 +198,12 @@ export default function MealPlanPage() {
           '.'
       );
     } catch (err: any) {
-      setStatus(err?.message ?? 'Einkaufsliste aktualisieren fehlgeschlagen');
+      showToast(err?.message ?? 'Einkaufsliste aktualisieren fehlgeschlagen');
     }
   };
 
   const saveTemplate = async () => {
     if (!user || !templateName.trim() || !Object.keys(plan).length) return;
-    setPlanError('');
     try {
       await addDoc(collection(db, 'mealplanTemplates'), {
         ownerId: user.uid,
@@ -215,14 +213,13 @@ export default function MealPlanPage() {
       });
       setTemplateName('');
     } catch (err: any) {
-      setPlanError(err?.message ?? 'Vorlage speichern fehlgeschlagen');
+      showToast(err?.message ?? 'Vorlage speichern fehlgeschlagen');
     }
   };
 
   const applyTemplate = async (t: MealPlanTemplate) => {
     if (!user) return;
     if (!window.confirm(`Vorlage "${t.name}" anwenden? Die aktuelle Wochenplanung wird ersetzt.`)) return;
-    setPlanError('');
     const validRecipeIds = new Set(recipes.map((r) => r.id).filter((id): id is string => Boolean(id)));
     const { toSet, toDelete } = computeTemplateApply(plan, t.days, validRecipeIds);
     const batch = writeBatch(db);
@@ -235,18 +232,17 @@ export default function MealPlanPage() {
     try {
       await batch.commit();
     } catch (err: any) {
-      setPlanError(err?.message ?? 'Vorlage anwenden fehlgeschlagen');
+      showToast(err?.message ?? 'Vorlage anwenden fehlgeschlagen');
     }
   };
 
   const removeTemplate = async (id?: string) => {
     if (!id) return;
     if (!window.confirm('Vorlage wirklich löschen?')) return;
-    setPlanError('');
     try {
       await deleteDoc(doc(db, 'mealplanTemplates', id));
     } catch (err: any) {
-      setPlanError(err?.message ?? 'Vorlage löschen fehlgeschlagen');
+      showToast(err?.message ?? 'Vorlage löschen fehlgeschlagen');
     }
   };
 
@@ -285,7 +281,6 @@ export default function MealPlanPage() {
         <p className="meta">Schon im Vorrat (wird nicht hinzugefügt): {pantryHits.join(', ')}</p>
       )}
       {status && <p className="meta">{status}</p>}
-      {planError && <div className="error">{planError}</div>}
 
       {DAYS.map((label, day) => {
         const dp = plan[day];

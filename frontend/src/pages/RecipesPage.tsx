@@ -12,9 +12,11 @@ import { scaleIngredients, type ScaledRecipe } from '../lib/scale';
 import { deleteRecipePhoto, uploadRecipePhoto } from '../lib/photo';
 import { searchRecipes } from '../lib/recipeSearch';
 import { estimateNutrition, kcalBucketFor } from '../lib/nutrition';
+import { useToast } from '../lib/ToastContext';
 
 export default function RecipesPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [filter, setFilter] = useState<string>('alle');
   const [search, setSearch] = useState('');
@@ -114,8 +116,12 @@ export default function RecipesPage() {
   const del = async () => {
     if (!selected?.id) return;
     if (!window.confirm('Rezept wirklich löschen?')) return;
-    await deleteDoc(doc(db, 'recipes', selected.id));
-    setSelectedId(null);
+    try {
+      await deleteDoc(doc(db, 'recipes', selected.id));
+      setSelectedId(null);
+    } catch (err: any) {
+      showToast(err?.message ?? 'Löschen fehlgeschlagen');
+    }
   };
 
   const runAdjust = async () => {
