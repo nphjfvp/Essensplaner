@@ -10,11 +10,14 @@ import { adjustRecipe, type AdjustedRecipe } from '../lib/adjust';
 import { reviewRecipe } from '../lib/review';
 import { scaleIngredients, type ScaledRecipe } from '../lib/scale';
 import { deleteRecipePhoto, uploadRecipePhoto } from '../lib/photo';
+import { searchRecipes } from '../lib/recipeSearch';
+import { estimateNutrition, kcalBucketFor } from '../lib/nutrition';
 
 export default function RecipesPage() {
   const { user } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [filter, setFilter] = useState<string>('alle');
+  const [search, setSearch] = useState('');
   const { all: allFolders } = useFolders(user?.uid);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -41,6 +44,9 @@ export default function RecipesPage() {
   const [scaleResult, setScaleResult] = useState<ScaledRecipe | null>(null);
   const [scaleError, setScaleError] = useState('');
 
+  const [nutritionLoading, setNutritionLoading] = useState(false);
+  const [nutritionError, setNutritionError] = useState('');
+
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState('');
 
@@ -52,7 +58,7 @@ export default function RecipesPage() {
     });
   }, [user]);
 
-  const visible = filter === 'alle' ? recipes : recipes.filter((r) => r.folders.includes(filter));
+  const visible = searchRecipes(filter === 'alle' ? recipes : recipes.filter((r) => r.folders.includes(filter)), search);
   const selected = recipes.find((r) => r.id === selectedId) ?? null;
 
   const open = (r: Recipe) => {
@@ -70,6 +76,7 @@ export default function RecipesPage() {
     setScaleResult(null);
     setScaleError('');
     setPhotoError('');
+    setNutritionError('');
   };
 
   const startEdit = () => {
@@ -263,6 +270,28 @@ export default function RecipesPage() {
     }
   };
 
+  const reestimateNutrition = async () => {
+    if (!selected?.id || !user) return;
+    setNutritionError('');
+    setNutritionLoading(true);
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error('Kein OpenRouter-Key — bitte in den Einstellungen hinterlegen');
+      const settings = await loadSettings(user.uid);
+      const nutrition = await estimateNutrition(selected, apiKey, settings.nutrition);
+      await updateDoc(doc(db, 'recipes', selected.id), {
+        estimated_nutrition: nutrition,
+        estimated_price: nutrition.price_eur,
+        kcal_bucket: kcalBucketFor(nutrition.kcal),
+        updatedAt: Date.now(),
+      });
+    } catch (err: any) {
+      setNutritionError(err?.message ?? 'Neuschätzung fehlgeschlagen');
+    } finally {
+      setNutritionLoading(false);
+    }
+  };
+
   const toggleEditFolder = (f: string) => {
     setEditFolders((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   };
@@ -290,6 +319,12 @@ export default function RecipesPage() {
     <div className="page">
       <h2>Rezepte</h2>
 
+      <input
+        placeholder="Suche nach Titel oder Zutat…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
       <div className="tabs">
         <button className={filter === 'alle' ? 'active' : ''} onClick={() => setFilter('alle')}>
           Alle
@@ -301,7 +336,8 @@ export default function RecipesPage() {
         ))}
       </div>
 
-      {visible.length === 0 && <p>Noch keine Rezepte. Importiere eins.</p>}
+      {visible.length === 0 && recipes.length === 0 && <p>Noch keine Rezepte. Importiere eins.</p>}
+      {visible.length === 0 && recipes.length > 0 && <p>Keine Treffer für diese Suche/diesen Filter.</p>}
 
       <div className="cards">
         {visible.map((r) => (
@@ -369,7 +405,7 @@ export default function RecipesPage() {
             ))}
           </ol>
 
-          {selected.estimated_nutrition && (
+          {selected.estimated_nutrition ? (
             <div className="nutrition">
               <h4>Nährwerte (geschätzt, pro Portion)</h4>
               <div>
@@ -381,7 +417,10 @@ export default function RecipesPage() {
                 <span>💰 ~{selected.estimated_nutrition.price_eur} €</span>
               </div>
             </div>
+          ) : (
+            <p className="meta">Keine Nährwerte geschätzt.</p>
           )}
+          {nutritionError && <div className="error">{nutritionError}</div>}
 
           <button className="primary" onClick={startEdit}>
             Bearbeiten
@@ -390,6 +429,9 @@ export default function RecipesPage() {
           <button onClick={() => setReviewOpen((v) => !v)}>Review</button>
           <button onClick={() => setAdjustOpen((v) => !v)}>Anpassen</button>
           <button onClick={() => setScaleOpen((v) => !v)}>Portionen skalieren</button>
+          <button onClick={reestimateNutrition} disabled={nutritionLoading}>
+            {nutritionLoading ? 'Schätze…' : 'Nährwerte neu schätzen'}
+          </button>
 
           {scaleOpen && (
             <div className="field">
