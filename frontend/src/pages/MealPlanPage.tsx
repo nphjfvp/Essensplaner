@@ -3,6 +3,7 @@ import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDo
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Recipe } from '../lib/types';
+import { categorize } from '../lib/shoppingCategories';
 
 const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
@@ -121,6 +122,7 @@ export default function MealPlanPage() {
         await addDoc(collection(db, 'shopping'), {
           ownerId: user.uid,
           name: v.name,
+          category: categorize(v.name),
           amount: v.amount,
           unit: v.unit,
           done: false,

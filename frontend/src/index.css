@@ -258,3 +258,12 @@ nav a {
   border-radius: 8px;
   margin: 10px 0;
 }
+
+.shop-group {
+  margin-top: 16px;
+}
+
+.shop-group h4 {
+  margin-bottom: 4px;
+  color: #2e7d32;
+}
