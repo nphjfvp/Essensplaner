@@ -17,8 +17,8 @@ export default defineConfig({
         start_url: '/recipes',
         scope: '/',
         display: 'standalone',
-        theme_color: '#2e7d32',
-        background_color: '#fafafa',
+        theme_color: '#7c3aed',
+        background_color: '#faf9fc',
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },

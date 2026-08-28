@@ -299,7 +299,7 @@ export default function RecipesPage() {
 
       <div className="cards">
         {visible.map((r) => (
-          <div className="card" key={r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
+          <div className="card clickable" key={r.id} onClick={() => open(r)}>
             {r.image_url && <img src={r.image_url} alt={r.title} className="card-photo" />}
             <h3>{r.title}</h3>
             <div className="meta">
