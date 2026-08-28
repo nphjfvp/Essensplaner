@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
@@ -6,6 +7,7 @@ import { extractRecipe } from '../lib/extract';
 import { estimateNutrition, classifyRecipe } from '../lib/nutrition';
 import { getApiKey } from '../lib/openrouter';
 import { loadSettings } from '../lib/settings';
+import { parseSharedPayload } from '../lib/share';
 import type { Recipe, Nutrition, KcalBucket, SourceType } from '../lib/types';
 import { DEFAULT_FOLDERS } from '../lib/folders';
 import { useFolders } from '../lib/useFolders';
@@ -42,12 +44,36 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function ImportPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [mode, setMode] = useState<Mode>('url');
   const [url, setUrl] = useState('');
   const [text, setText] = useState('');
   const [imageDataUrls, setImageDataUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sharedHint, setSharedHint] = useState(false);
+
+  // Vom OS-Teilen-Menü übergebene Daten (z.B. Instagram/TikTok-Link geteilt
+  // an die installierte App) übernehmen und aus der URL entfernen.
+  useEffect(() => {
+    const shared = parseSharedPayload({
+      title: searchParams.get('title') ?? undefined,
+      text: searchParams.get('text') ?? undefined,
+      url: searchParams.get('url') ?? undefined,
+    });
+    if (!shared.url && !shared.text) return;
+    if (shared.url) {
+      setUrl(shared.url);
+      setMode('url');
+    }
+    if (shared.text) {
+      setText(shared.text);
+      if (!shared.url) setMode('text');
+    }
+    setSharedHint(true);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [draft, setDraft] = useState<Recipe | null>(null);
   const [nutrition, setNutrition] = useState<Nutrition | null>(null);
@@ -148,6 +174,8 @@ export default function ImportPage() {
   return (
     <div className="page">
       <h2>Rezept importieren</h2>
+
+      {sharedHint && <p className="meta">Geteilter Link/Text übernommen — bitte prüfen und importieren.</p>}
 
       <div className="tabs">
         {(['url', 'text', 'image'] as Mode[]).map((m) => (

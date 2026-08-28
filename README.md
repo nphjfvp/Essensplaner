@@ -59,3 +59,9 @@ Token als GitHub-Secret `FIREBASE_TOKEN` hinterlegen (Repo → Settings → Secr
 ## Modellwahl
 
 Pro Funktion separat in den App-Settings einstellbar (Extraktion, Vision, Nährwert, Anpassung, Review). Defaults in `frontend/src/lib/models.ts`. Inkl. kostenloser OpenRouter-Modelle.
+
+## Teilen aus Instagram/TikTok/YouTube (PWA Share Target)
+
+Essensplaner ist als installierbare PWA konfiguriert (Manifest + Icons in `frontend/public/icons`, generiert via `frontend/scripts/generate-icons.mjs`). Einmal installiert ("Zum Startbildschirm hinzufügen"), erscheint sie im OS-Teilen-Menü: ein aus Instagram/TikTok/YouTube geteilter Link landet direkt vorausgefüllt im Import (`frontend/src/lib/share.ts` extrahiert Link + Caption aus dem geteilten Text).
+
+**Einschränkung:** Die Web-Share-Target-API wird nur von Android/Chrome unterstützt — iOS/Safari kennt sie nicht. Auf iOS bleibt nur "Link kopieren" → manuell in den Import einfügen.
