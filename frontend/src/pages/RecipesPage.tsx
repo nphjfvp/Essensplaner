@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, deleteField, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { Ingredient, Recipe } from '../lib/types';
@@ -9,6 +9,7 @@ import { loadSettings } from '../lib/settings';
 import { adjustRecipe, type AdjustedRecipe } from '../lib/adjust';
 import { reviewRecipe } from '../lib/review';
 import { scaleIngredients, type ScaledRecipe } from '../lib/scale';
+import { deleteRecipePhoto, uploadRecipePhoto } from '../lib/photo';
 
 export default function RecipesPage() {
   const { user } = useAuth();
@@ -40,6 +41,9 @@ export default function RecipesPage() {
   const [scaleResult, setScaleResult] = useState<ScaledRecipe | null>(null);
   const [scaleError, setScaleError] = useState('');
 
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'recipes'), where('ownerId', '==', user.uid));
@@ -65,6 +69,7 @@ export default function RecipesPage() {
     setScaleServings('');
     setScaleResult(null);
     setScaleError('');
+    setPhotoError('');
   };
 
   const startEdit = () => {
@@ -225,6 +230,33 @@ export default function RecipesPage() {
     }
   };
 
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selected?.id || !user) return;
+    setPhotoError('');
+    setPhotoUploading(true);
+    try {
+      const url = await uploadRecipePhoto(user.uid, selected.id, file);
+      await updateDoc(doc(db, 'recipes', selected.id), { image_url: url, updatedAt: Date.now() });
+    } catch (err: any) {
+      setPhotoError(err?.message ?? 'Foto-Upload fehlgeschlagen');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const removePhoto = async () => {
+    if (!selected?.id || !user) return;
+    setPhotoError('');
+    try {
+      await deleteRecipePhoto(user.uid, selected.id);
+      await updateDoc(doc(db, 'recipes', selected.id), { image_url: deleteField(), updatedAt: Date.now() });
+    } catch (err: any) {
+      setPhotoError(err?.message ?? 'Entfernen fehlgeschlagen');
+    }
+  };
+
   const toggleEditFolder = (f: string) => {
     setEditFolders((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   };
@@ -268,6 +300,7 @@ export default function RecipesPage() {
       <div className="cards">
         {visible.map((r) => (
           <div className="card" key={r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
+            {r.image_url && <img src={r.image_url} alt={r.title} className="card-photo" />}
             <h3>{r.title}</h3>
             <div className="meta">
               <span>{r.servings} Port.</span>
@@ -290,6 +323,20 @@ export default function RecipesPage() {
       {selected && !editing && (
         <div className="draft">
           <h3>{selected.title}</h3>
+
+          {selected.image_url && <img src={selected.image_url} alt={selected.title} className="recipe-photo" />}
+          <div className="field">
+            <label>{selected.image_url ? 'Foto ersetzen' : 'Foto vom Ergebnis hochladen (optional, nach dem Kochen)'}</label>
+            <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} disabled={photoUploading} />
+            {photoUploading && <p className="meta">Lädt hoch…</p>}
+            {selected.image_url && (
+              <button onClick={removePhoto} disabled={photoUploading}>
+                Foto entfernen
+              </button>
+            )}
+            {photoError && <div className="error">{photoError}</div>}
+          </div>
+
           <div className="meta">
             <span>{selected.servings} Port.</span>
             {selected.estimated_nutrition && (
