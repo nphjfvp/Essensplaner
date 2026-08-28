@@ -5,6 +5,8 @@ import { useAuth } from '../auth/AuthContext';
 import { DEFAULT_MODELS, MODEL_OPTIONS, sanitizeSettings } from '../lib/models';
 import { getApiKey, saveApiKey } from '../lib/openrouter';
 import { EMPTY_GOALS } from '../lib/goals';
+import { exportUserData, importUserData } from '../lib/exportImport';
+import { useToast } from '../lib/ToastContext';
 import type { ModelSettings, NutritionGoals } from '../lib/types';
 
 const KEYS: { key: keyof ModelSettings; label: string }[] = [
@@ -24,12 +26,15 @@ const GOAL_KEYS: { key: keyof NutritionGoals; label: string }[] = [
 
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [settings, setSettings] = useState<ModelSettings>({ ...DEFAULT_MODELS });
   const [goals, setGoals] = useState<NutritionGoals>({ ...EMPTY_GOALS });
   const [allowCorsProxy, setAllowCorsProxy] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [exportBusy, setExportBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -53,6 +58,48 @@ export default function SettingsPage() {
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
       setSaveError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
+  };
+
+  const exportData = async () => {
+    if (!user) return;
+    setExportBusy(true);
+    try {
+      const bundle = await exportUserData(user.uid);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `essensplaner-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      showToast(err?.message ?? 'Export fehlgeschlagen');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const importData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !user) return;
+    if (
+      !window.confirm(
+        'Daten aus dieser Datei importieren? Vorhandene Rezepte mit gleicher ID werden überschrieben, alles andere kommt zusätzlich dazu.'
+      )
+    ) {
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const count = await importUserData(user.uid, JSON.parse(text));
+      showToast(`${count} Einträge importiert.`, 'info');
+    } catch (err: any) {
+      showToast(err?.message ?? 'Import fehlgeschlagen');
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -118,6 +165,22 @@ export default function SettingsPage() {
           Fall an einen externen Proxy (allorigins.win oder corsproxy.io) geschickt. Standardmäßig aus — ohne
           Zustimmung geht keine URL an Dritte, das Rezept muss dann per Text eingefügt werden.
         </p>
+      </div>
+
+      <h3>Daten exportieren / importieren</h3>
+      <p className="meta">
+        Backup als JSON-Datei, oder Daten in einen anderen Account umziehen. Rezepte behalten dabei ihre ID (Vorlagen
+        und Wochenplan verweisen darauf), alles andere wird neu angelegt.
+      </p>
+      <div className="field">
+        <button onClick={exportData} disabled={exportBusy}>
+          {exportBusy ? 'Exportiere…' : 'Alle Daten exportieren'}
+        </button>
+      </div>
+      <div className="field">
+        <label>Export-Datei importieren</label>
+        <input type="file" accept="application/json" onChange={importData} disabled={importBusy} />
+        {importBusy && <p className="meta">Importiere…</p>}
       </div>
 
       {saveError && <div className="error">{saveError}</div>}
