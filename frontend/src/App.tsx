@@ -1,4 +1,4 @@
-import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import LoginPage from './pages/LoginPage';
 import ImportPage from './pages/ImportPage';
@@ -16,11 +16,25 @@ function Shell() {
   return (
     <div className="app">
       <nav>
-        <Link to="/recipes">Rezepte</Link>
-        <Link to="/import">Import</Link>
-        <Link to="/plan">Wochenplan</Link>
-        <Link to="/pantry">Vorrat & Einkauf</Link>
-        <Link to="/settings">Settings</Link>
+        <span className="brand">
+          <img src="/favicon.svg" alt="" />
+          Essensplaner
+        </span>
+        <NavLink to="/recipes" className={({ isActive }) => (isActive ? 'active-link' : '')}>
+          Rezepte
+        </NavLink>
+        <NavLink to="/import" className={({ isActive }) => (isActive ? 'active-link' : '')}>
+          Import
+        </NavLink>
+        <NavLink to="/plan" className={({ isActive }) => (isActive ? 'active-link' : '')}>
+          Wochenplan
+        </NavLink>
+        <NavLink to="/pantry" className={({ isActive }) => (isActive ? 'active-link' : '')}>
+          Vorrat & Einkauf
+        </NavLink>
+        <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active-link' : '')}>
+          Settings
+        </NavLink>
         <button onClick={signOut}>Logout</button>
       </nav>
       <Routes>
