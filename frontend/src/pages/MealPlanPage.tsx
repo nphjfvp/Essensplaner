@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../auth/AuthContext';
 import type { NutritionGoals, Recipe } from '../lib/types';
 import { categorize } from '../lib/shoppingCategories';
 import { EMPTY_GOALS, hasGoals, loadGoals } from '../lib/goals';
-import { computeTemplateApply, type MealPlanTemplate } from '../lib/mealplanTemplates';
+import { computeTemplateApply, type DayPlan, type MealPlanTemplate } from '../lib/mealplanTemplates';
+import { scaleIngredients } from '../lib/scale';
 
 const GOAL_LABELS: { key: keyof NutritionGoals; label: string; unit: string }[] = [
   { key: 'kcal', label: 'Kalorien', unit: 'kcal' },
@@ -19,7 +20,7 @@ const DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samsta
 export default function MealPlanPage() {
   const { user } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [plan, setPlan] = useState<Record<number, string>>({});
+  const [plan, setPlan] = useState<Record<number, DayPlan>>({});
   const [shopping, setShopping] = useState<{ id: string; name: string; amount?: number; unit?: string }[]>([]);
   const [pantry, setPantry] = useState<{ name: string }[]>([]);
   const [goals, setGoals] = useState<NutritionGoals>({ ...EMPTY_GOALS });
@@ -42,10 +43,11 @@ export default function MealPlanPage() {
 
     const q2 = query(collection(db, 'mealplan'), where('ownerId', '==', user.uid));
     const unsub2 = onSnapshot(q2, (snap) => {
-      const m: Record<number, string> = {};
+      const m: Record<number, DayPlan> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
-        m[data.day as number] = data.recipeId as string;
+        // portions fehlt bei älteren Einträgen (vor diesem Feature) — Default 1.
+        m[data.day as number] = { recipeId: data.recipeId as string, portions: (data.portions as number) || 1 };
       });
       setPlan(m);
     });
@@ -86,53 +88,71 @@ export default function MealPlanPage() {
       if (!recipeId) {
         if (plan[day]) await deleteDoc(doc(db, 'mealplan', `${user.uid}_${day}`));
       } else {
-        await setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId });
+        // Portionen bei Rezeptwechsel beibehalten, statt auf 1 zurückzusetzen.
+        const portions = plan[day]?.portions ?? 1;
+        await setDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId, portions });
       }
     } catch (err: any) {
       setPlanError(err?.message ?? 'Speichern fehlgeschlagen');
     }
   };
 
-  const plannedRecipes = useMemo(
+  const setPortions = async (day: number, portions: number) => {
+    if (!user || !plan[day] || portions < 1) return;
+    setPlanError('');
+    try {
+      await updateDoc(doc(db, 'mealplan', `${user.uid}_${day}`), { portions });
+    } catch (err: any) {
+      setPlanError(err?.message ?? 'Speichern fehlgeschlagen');
+    }
+  };
+
+  const plannedEntries = useMemo(
     () =>
       Object.values(plan)
-        .map((rid) => recipes.find((r) => r.id === rid))
-        .filter((r): r is Recipe => Boolean(r)),
+        .map((dp) => {
+          const recipe = recipes.find((r) => r.id === dp.recipeId);
+          return recipe ? { recipe, portions: dp.portions } : null;
+        })
+        .filter((e): e is { recipe: Recipe; portions: number } => e !== null),
     [plan, recipes]
   );
 
   const weeklyTotals: NutritionGoals = useMemo(
     () => ({
-      kcal: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.kcal ?? 0), 0),
-      protein_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.protein_g ?? 0), 0),
-      carbs_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.carbs_g ?? 0), 0),
-      fat_g: plannedRecipes.reduce((s, r) => s + (r.estimated_nutrition?.fat_g ?? 0), 0),
+      kcal: plannedEntries.reduce((s, e) => s + (e.recipe.estimated_nutrition?.kcal ?? 0) * e.portions, 0),
+      protein_g: plannedEntries.reduce((s, e) => s + (e.recipe.estimated_nutrition?.protein_g ?? 0) * e.portions, 0),
+      carbs_g: plannedEntries.reduce((s, e) => s + (e.recipe.estimated_nutrition?.carbs_g ?? 0) * e.portions, 0),
+      fat_g: plannedEntries.reduce((s, e) => s + (e.recipe.estimated_nutrition?.fat_g ?? 0) * e.portions, 0),
     }),
-    [plannedRecipes]
+    [plannedEntries]
   );
-  const totalKcal = weeklyTotals.kcal;
+  const totalKcal = Math.round(weeklyTotals.kcal);
 
   const pantryHits = useMemo(() => {
     const pantryNames = new Set(pantry.map((p) => p.name.trim().toLowerCase()));
     const names = new Set<string>();
-    for (const r of plannedRecipes) {
-      for (const ing of r.ingredients) {
+    for (const e of plannedEntries) {
+      for (const ing of e.recipe.ingredients) {
         if (pantryNames.has(ing.name.trim().toLowerCase())) names.add(ing.name.trim());
       }
     }
     return Array.from(names);
-  }, [plannedRecipes, pantry]);
+  }, [plannedEntries, pantry]);
 
   // Name+Einheit als Schlüssel: unterschiedliche Einheiten werden nicht vermischt,
   // sondern als eigene Positionen behandelt (statt eine davon still zu verwerfen).
   const shoppingKey = (name: string, unit: string) => `${name.trim().toLowerCase()}|${unit.trim().toLowerCase()}`;
 
   const addWeekToShopping = async () => {
-    if (!user || !plannedRecipes.length) return;
+    if (!user || !plannedEntries.length) return;
     setStatus('');
     const agg = new Map<string, { name: string; amount: number; unit: string }>();
-    for (const r of plannedRecipes) {
-      for (const ing of r.ingredients) {
+    for (const e of plannedEntries) {
+      // Zutatenmengen auf die geplante Portionenzahl skalieren, nicht die
+      // volle Rezeptmenge annehmen.
+      const scaled = scaleIngredients(e.recipe.ingredients, e.recipe.servings, e.portions).ingredients;
+      for (const ing of scaled) {
         const key = shoppingKey(ing.name, ing.unit);
         const existing = agg.get(key);
         if (existing) {
@@ -206,8 +226,8 @@ export default function MealPlanPage() {
     const validRecipeIds = new Set(recipes.map((r) => r.id).filter((id): id is string => Boolean(id)));
     const { toSet, toDelete } = computeTemplateApply(plan, t.days, validRecipeIds);
     const batch = writeBatch(db);
-    for (const [day, recipeId] of toSet) {
-      batch.set(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId });
+    for (const [day, dp] of toSet) {
+      batch.set(doc(db, 'mealplan', `${user.uid}_${day}`), { ownerId: user.uid, day, recipeId: dp.recipeId, portions: dp.portions });
     }
     for (const day of toDelete) {
       batch.delete(doc(db, 'mealplan', `${user.uid}_${day}`));
@@ -258,7 +278,7 @@ export default function MealPlanPage() {
         </div>
       )}
 
-      <button className="primary" onClick={addWeekToShopping} disabled={!plannedRecipes.length}>
+      <button className="primary" onClick={addWeekToShopping} disabled={!plannedEntries.length}>
         Zutaten der Woche auf Einkaufsliste
       </button>
       {pantryHits.length > 0 && (
@@ -268,11 +288,12 @@ export default function MealPlanPage() {
       {planError && <div className="error">{planError}</div>}
 
       {DAYS.map((label, day) => {
-        const r = recipes.find((x) => x.id === plan[day]);
+        const dp = plan[day];
+        const r = recipes.find((x) => x.id === dp?.recipeId);
         return (
           <div className="card" key={day}>
             <strong>{label}</strong>
-            <select value={plan[day] ?? ''} onChange={(e) => assign(day, e.target.value)}>
+            <select value={dp?.recipeId ?? ''} onChange={(e) => assign(day, e.target.value)}>
               <option value="">— frei —</option>
               {recipes.map((x) => (
                 <option key={x.id} value={x.id}>
@@ -280,8 +301,20 @@ export default function MealPlanPage() {
                 </option>
               ))}
             </select>
-            {r?.estimated_nutrition && (
-              <span className="meta">🔥 {r.estimated_nutrition.kcal} kcal</span>
+            {r && (
+              <div className="meta">
+                <label>
+                  Portionen:{' '}
+                  <input
+                    type="number"
+                    min={1}
+                    value={dp?.portions ?? 1}
+                    onChange={(e) => setPortions(day, Number(e.target.value) || 1)}
+                    style={{ width: '4em', display: 'inline-block' }}
+                  />
+                </label>
+                {r.estimated_nutrition && <span>🔥 {Math.round(r.estimated_nutrition.kcal * (dp?.portions ?? 1))} kcal</span>}
+              </div>
             )}
           </div>
         );
